@@ -16,7 +16,7 @@ from here.
 
 ## Canonical Documentation
 
-- Project overview and user entry points: [`readme.md`](readme.md)
+- Project overview and user entry points: [`README.md`](README.md)
 - Systems-engineering record (source of truth for intent, product, architecture,
   implementation, verification, operation, review, and open work):
   [`docs/breakdown/README.md`](docs/breakdown/README.md), managed with the
@@ -54,8 +54,13 @@ cmake --preset=vcpkg
 cmake --build build
 ctest --test-dir build --output-on-failure -j   # canonical C++ test runner
 tests/run_unit.sh --tier T1                     # focused unit tier (T1/T2/T3)
+pip install -e ./build/public/python_api        # Python API; never pip install the repo root
 pytest -q tests/python
 ```
+
+There is no Python lint or format gate: the repository has no `ruff.toml` and
+no lint configuration in a Python project file. Match the surrounding C++ style
+in [docs/development.md](docs/development.md).
 
 ### Information Hygiene — Mandatory
 

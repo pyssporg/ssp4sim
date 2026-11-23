@@ -14,11 +14,15 @@ Tagged releases (`v*`) publish dual artifacts:
 - Linux alias: `ssp4sim-linux-x86_64-latest.tar.gz`
 - Wheel alias: `pyssp4sim-0.0.0.dev0-cp39-abi3-linux_x86_64.whl`
 
-The Linux tarball contains:
+The Linux tarball is produced by `cmake --install`. The install rules contribute:
 
 - `bin/sim_app`
 - `python/pyssp4sim` (Python API package with native extension)
-- [`readme.md`](../README.md), [`LICENSE`](../LICENSE), `RELEASE.txt`
+- `lib/` and `include/` from the bundled third-party libraries
+- [`LICENSE`](../LICENSE) and generated `RELEASE.txt`
+
+The tarball does not install the example configs or `resources/`; those stay in
+a source checkout.
 
 Download and verify the latest release:
 
@@ -49,10 +53,11 @@ Verify the installed CLI version:
 sim_app --version
 ```
 
-Run an example simulation:
+Run a simulation with a config that points at your own SSP. The example configs
+live in a source checkout, not in the tarball:
 
 ```bash
-sim_app $HOME/.local/opt/ssp4sim/resources/embrace/embrace.json
+sim_app /path/to/ssp4sim/resources/embrace/embrace.json
 ```
 
 Usage details are in [Usage](usage.md).

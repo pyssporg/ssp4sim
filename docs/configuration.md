@@ -77,7 +77,7 @@ For CLI and Python invocation examples, see [Usage](usage.md).
 | `simulation.timestep` | `double` | Yes | - | Seconds. |
 | `simulation.tolerance` | `double` | Yes | - | FMU experiment tolerance. |
 | `simulation.realtime` | `bool` | No | `false` | Sync simulation progress to the computer clock. |
-| `simulation.working_dir` | `string` | No | `.` | Base directory for default recorder and log output paths. |
+| `simulation.working_dir` | `string` | No | `./wd/default` | Base directory for default recorder and log output paths. |
 
 ### `simulation.executor.*`
 
@@ -86,7 +86,7 @@ For CLI and Python invocation examples, see [Usage](usage.md).
 | `simulation.executor.forward_derivatives` | `bool` | No | `true` | Enables derivative forwarding on model connections. |
 | `simulation.executor.method` | `string` | No | `jacobi` | `jacobi`, `seidel`, `custom_delay`, `custom_delay_partial`, `la2` (legacy alias `loop_aware`). `parallel_seidel` is **not** implemented and throws at config selection. |
 | `simulation.executor.thread_pool_workers` | `int` | No | `5` | Used by some parallel Jacobi modes. |
-| `simulation.executor.sub_step` | `double` | No | `simulation.timestep` | Reserved; currently no executor reads this key. `la2` sub-stepping is controlled by `simulation.executor.la2.*` (mode, iterations, factor, threshold) instead. |
+| `simulation.executor.sub_step` | `double` | No | - | Reserved; currently no executor reads this key. `la2` sub-stepping is controlled by `simulation.executor.la2.*` (mode, iterations, factor, threshold) instead. |
 | `simulation.executor.jacobi.parallel` | `bool` | No | `false` | If `true`, uses a parallel Jacobi implementation. |
 | `simulation.executor.jacobi.method` | `int` | No | `1` | `1` = TBB, `2` = spin pool, `3` = futures. |
 | `simulation.executor.seidel.parallel` | `bool` | No | `false` | If `true`, selects `ParallelSeidel`; **not implemented** — throws at config selection. Else `SerialSeidel`. |
@@ -121,12 +121,12 @@ Notes:
 
 | Key | Type | Required | Default | Notes |
 |---|---|---|---|---|
-| `simulation.recording.csv.enable` | `bool` | No | `false` | Enables the CSV export recorder. CSV is the portable export path for the primary local database artifact. |
+| `simulation.recording.csv.enable` | `bool` | No | `true` | Enables the CSV export recorder. CSV is the portable export path for the primary local database artifact. |
 | `simulation.recording.csv.file` | `string` | No | `simulation.working_dir/result.csv` | Output CSV path (`[TIME]` supported). When omitted, the recorder writes to the working directory. |
-| `simulation.recording.csv.interval` | `double` | No | `1.0` | Seconds between recorded CSV samples. |
+| `simulation.recording.csv.interval` | `double` | No | `0.0` | Seconds between recorded CSV samples; `0.0` records every timestep. |
 | `simulation.recording.csv.flush_interval` | `double` | No | `0.0` | Wall-clock seconds between incremental CSV flushes. When greater than zero, the recorder writes buffered rows to disk periodically during the run (once rows are complete), so a run interrupted before a clean shutdown still keeps its recorded data. Default `0.0` keeps the buffered-until-stop behavior. |
 | `simulation.recording.sqlite.enable` | `bool` | No | `false` | Enables the SQLite WAL recorder for live-concurrent-reader access. When `simulation.recording.sqlite.file` is absent (default), SQLite WAL writes one database file per simulation run, named `{epoch_seconds}_{session_uuid}.sqlite`, in the working directory — this is the safe default for concurrent simulations. When `sqlite.file` is set, the sink writes to that specific path instead (sequential-only — see safety table below). Within each file, every signal storage creates a separate table named `{run_id}_{model}_{storage_name}` storing `timestamp_ns`, `simulation_time_s`, and the storage variables. WAL journal mode allows concurrent readers during writes. The writer batches 10,000 inserted rows per transaction, uses `PRAGMA synchronous=NORMAL`, and defers WAL checkpointing until shutdown to reduce commit overhead; transactions remain atomic, but live readers see data in larger batches and the last committed transactions can be less durable than SQLite `FULL` synchronous mode if the host loses power. |
-| `simulation.recording.sqlite.file` | `string` | No | *auto-generated* | Output SQLite database path (`[TIME]` supported). When **absent** (the default), the sink auto-generates one `.sqlite` file per run as `{epoch_seconds}_{session_uuid}.sqlite` in `simulation.working_dir`. When **set**, the sink writes to the specified path — this is an opt-in for sequential-only workflows that need a stable known path. The shared-file mode (`sqlite.file` set) **must never** be used with concurrent writers. |
+| `simulation.recording.sqlite.file` | `string` | No | *auto-generated* | Output SQLite database path, resolved under `simulation.working_dir` when set (`[TIME]` supported). When **absent** (the default), the sink auto-generates one `.sqlite` file per run as `{epoch_seconds}_{session_uuid}.sqlite` in `simulation.working_dir`. When **set**, the sink writes to the specified path — this is an opt-in for sequential-only workflows that need a stable known path. The shared-file mode (`sqlite.file` set) **must never** be used with concurrent writers. |
 | `simulation.recording.wait_for` | `bool` | No | `false` | If `true`, simulation producer threads wait when recorder buffers are full. If `false`, recorder events can be dropped under backpressure. |
 | `simulation.recording.record_inputs` | `bool` | No | `false` | When `true`, input signal values are recorded alongside output signals in CSV artifacts. Input storage has 10 slots; at the default recording interval (0 = every timestep), simulations with more than 10 steps may overflow the input buffer and silently drop events. |
 | `simulation.recording.record_derivatives` | `bool` | No | `false` | When `true`, exported signals gain one column per reserved derivative order (`.d1`, `.d2`, …) alongside the value, for both CSV and SQLite sinks. Derivative slots are only reserved for models declaring `maxOutputDerivativeOrder > 0`; signals without them produce no extra columns. Useful for verifying that forward-derivative values are anchored to the correct timestep. |
@@ -137,10 +137,11 @@ Notes:
 |---|---|---|---|---|
 | `simulation.log.file` | `string` | No | `simulation.working_dir/sim.log` | Base log file path (`[TIME]` supported). When omitted, log sinks use the working directory. |
 | `simulation.log.fmu` | `bool` | No | `false` | Enables FMU-level logging during instantiate/setup/step/terminate. Long multi-line FMU log messages are supported. |
-| `simulation.log.level_terminal` | `string` | No | `disable` | Overview tier console sink. Use for immediate human-readable progress while the simulation runs. |
+| `simulation.log.level_terminal` | `string` | No | `debug` | Overview tier console sink. Use for immediate human-readable progress while the simulation runs. |
 | `simulation.log.level_file` | `string` | No | `disable` | Overview tier plain text file sink. Uses `simulation.log.file` for the durable local summary log. |
 | `simulation.log.level_json` | `string` | No | `disable` | Deep-analysis tier JSON file sink. Uses `simulation.log.file + ".json"` for the full structured archive. |
 | `simulation.log.level_cutelog` | `string` | No | `disable` | Live navigation tier TCP sink. Uses `127.0.0.1:19996`. `disable` skips the sink. If the endpoint is unavailable, SSP4SIM logs a warning and continues without this sink. |
+| `simulation.log.start_values` | `string` | No | `start_values.csv` | Start-value log file name, resolved under `simulation.working_dir`. |
 
 Logging level values are passed through Quill's `loglevel_from_string()`.
 OpenTelemetry is the distributed observability tier and is documented in

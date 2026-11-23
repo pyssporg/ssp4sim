@@ -8,7 +8,8 @@ installation steps, see [Installation](installation.md). For source builds, see
 
 ## CLI
 
-Run `sim_app` with one JSON configuration file:
+Run `sim_app` with one JSON configuration file (the example config is in a
+source checkout):
 
 ```bash
 sim_app ./resources/embrace/embrace.json

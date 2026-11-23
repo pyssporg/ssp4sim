@@ -13,7 +13,7 @@ need to run the C++ binary or the Python suite.
 
 ## Test Architecture
 
-See docs/breakdown/04-verification/test-strategy.md for the strategic rationale and test coverage targets.
+See [test strategy](../docs/breakdown/04-verification/test-strategy.md) for the strategic rationale and test coverage targets.
 
 The suite is split by layer so each test has a clear responsibility:
 
@@ -114,7 +114,7 @@ same way.
 | T1 kernel/units | `tests/lib/core/`, `tests/lib/utils/` | `test_mpsc_event_queue`, `test_node`, `test_node_iterator`, `test_ring_buffer`, `test_config`, `test_thread_pool` |
 | T2 parser | `tests/lib/core/` | `test_parameter_binding`, `test_schema_extensions`, `test_signal_storage`, `test_ssp_elements`, `test_start_value` |
 | T3 analysis/graph | `tests/lib/analysis/`, `tests/lib/core/` | `test_graph_builder`, `test_ssp_node`, `test_tree_builder`, `test_parameter_binding_integration` |
-| T4 integration | `tests/lib/high_level/`, `tests/lib/core/`, `tests/lib/graph/`, `tests/lib/model/`, `tests/lib/scheduling/`, `tests/lib/simulation/` | retained in `ssp4sim_tests` |
+| T4 integration | `tests/lib/high_level/`, `tests/lib/core/`, `tests/lib/graph/`, `tests/lib/model/`, `tests/lib/simulation/` | retained in `ssp4sim_tests` |
 
 Note: `test_sim_graph_builder.cpp` exists in both `tests/lib/graph/` and
 `tests/lib/simulation/`; both are integration tests (no target-name clash). The
@@ -129,8 +129,8 @@ loop classification, component topological sort, `verify_placement()`, and the
 topological_sort building blocks, plus the connection-mutation primitives
 `disconnect()` and `redirect()`.
 
-`tests/lib/simulation/graph_executor/execution/` holds executor scheduling
-tests: `test_executor_builder_variants.cpp` (variant registry resolution),
+`tests/lib/simulation/graph_executor/execution/{loop_aware,substep}/` holds
+executor scheduling tests: `test_executor_builder_variants.cpp` (variant registry resolution),
 `test_la2_config_compat.cpp` (config contract), `test_la2_scheduling.cpp`
 (loop-only sub-stepping, outer-Gauss-Seidel ordering, the `la2.parallel` seam),
 and `test_substep_executor.cpp` (`LinearSubstepExecutor` /
@@ -193,7 +193,7 @@ SCC node count to converge; the test pins that with
 `simulation.executor.la2.iterations`. The legacy `loop_aware.*` config key
 namespace is no longer honored.
 
-See docs/breakdown/03-implementation/dependency-policy.md for the fmi4c mode-bit issue and recommended fixture handling.
+See [dependency policy](../docs/breakdown/03-implementation/dependency-policy.md) for the fmi4c mode-bit issue and recommended fixture handling.
 
 The reference sweep uses a `0.001` second simulation timestep. The `embrace`
 SSP needs this smaller communication step; with a coarse `0.1` second step,
@@ -210,10 +210,10 @@ multiple value types, including the hierarchical `dcmotor` fixture.
 Known regression fixtures have been resolved except for `signal_init_chain_guard`
 and `signal_init_loop_guard`, which are documented expected failures (strict
 xfails, see above). See
-docs/breakdown/04-verification/regressions.md for history.
+[regressions](../docs/breakdown/04-verification/regressions.md) for history.
 
 `test_smoke_simulator.cpp` also covers the FMU-archive extraction lifecycle from
-`docs/archive/deprecated/bug-report-ssp4sim-v030-fmu-extraction.md`:
+[the v0.3.0 FMU-extraction bug report](../docs/archive/deprecated/bug-report-ssp4sim-v030-fmu-extraction.md):
 it runs the simulator against `tests/resources/scenario_fmu_archive.ssp` (the
 `scenario` fixture packaged as a `.ssp` archive with the FMU re-zipped as a
 `.fmu`) and asserts that `init()`/`simulate()` run to completion and produce a

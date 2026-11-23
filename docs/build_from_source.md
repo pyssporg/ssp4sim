@@ -150,8 +150,9 @@ cmake --preset=vcpkg -DSSP4SIM_LOG_HOT_PATH=OFF
 
 See tests/README.md for the test architecture and tier matrix.
 
-Enable the C++ test target by adding `-DSSP4SIM_BUILD_TEST=ON` to the preset
-command, then rebuild. C++ tests come in two shapes: per-test unit binaries
+The C++ test target is enabled by default (`SSP4SIM_BUILD_TEST=ON`). Keep it on,
+or pass `-DSSP4SIM_BUILD_TEST=ON` explicitly, then rebuild. C++ tests come in
+two shapes: per-test unit binaries
 (`test_<name>`, each built from its own include cone under `lib/include/**`) and
 the retained integration binary `ssp4sim_tests`. CTest is the canonical runner:
 
@@ -173,19 +174,27 @@ More test-suite detail is in [tests/README.md](../tests/README.md).
 ## Build Python API (Editable Install)
 
 Use the same Python version for CMake and `pip`. The Python API requires a
-Release build, the editable version is derived from Git tags
-(`setuptools-scm`), and the native module targets the CPython Limited API
+Release build. The package version is the static `version` in
+`public/python_api/pyproject.toml` (currently `0.3.5`; it is not derived from
+Git tags), and the native module targets the CPython Limited API
 (`Py_LIMITED_API=0x03090000`) to produce an `abi3` extension.
+
+The Python package does not exist at the repository root; CMake generates it
+under `build/public/python_api`. `requirements.txt` ends with
+`-e build/public/python_api/`, so build before installing requirements, or
+install the runtime/test dependencies and the built package separately:
 
 ```bash
 python3.11 -m venv venv
 . ./venv/bin/activate
-pip install -r ./requirements.txt
 
 cmake --preset=vcpkg -DCMAKE_BUILD_TYPE=Release -DSSP4SIM_BUILD_PYTHON_API=ON -DSSP4SIM_LOG_HOT_PATH=OFF
-
 cmake --build build
-pip install -e ./build/public/python_api
+
+pip install -r ./requirements.txt   # numpy, pandas, matplotlib, pytest, and this package
+# Or separately:
+# pip install numpy pandas matplotlib pytest
+# pip install -e ./build/public/python_api
 ```
 
 Run Python tests after the Python API has been built:

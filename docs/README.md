@@ -27,5 +27,5 @@ This page indexes the SSP4SIM documentation. See [breakdown/README.md](breakdown
 
 - [Development Guide](development.md) — contributor workflow and conventions
 - [Tests](../tests/README.md) — C++ and Python test layout and commands
-- [Test Levels Analysis](test-levels-analysis.md) — coverage map and future implementation
+- [Test Levels Analysis](test-levels-analysis.md) — point-in-time coverage map from the per-test-build refactor (historical; [tests/README.md](../tests/README.md) describes the current layout)
 - [Release Pipeline](linux_binary_distribution.md) — Linux binary and wheel packaging

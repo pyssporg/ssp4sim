@@ -9,13 +9,44 @@ See [breakdown/01-product/capabilities.md](docs/breakdown/01-product/capabilitie
 Builds upon the [SSP4CPP](https://github.com/pyssporg/ssp4cpp) XML deserializer
 and uses [Quill](https://github.com/odygrd/quill) for logging.
 
-## Quick Start
+## Prerequisites
 
-Install the latest release (see [Installation](docs/installation.md)) or
-[build from source](docs/build_from_source.md), then run:
+- Linux `x86_64` for the prebuilt release artifacts. The Python module is an
+  `abi3` build and supports Python >= 3.9.
+- Source builds: CMake with presets support, Ninja, a C++23 compiler, and a
+  vcpkg checkout with `VCPKG_ROOT` set (see [vcpkg.md](vcpkg.md)).
+
+## Install
+
+Release tarballs and wheels are described in
+[Installation](docs/installation.md). A source checkout is not installed from
+the repository root: build first, then install the generated Python package
+from `build/public/python_api`:
 
 ```bash
-sim_app ./resources/embrace/embrace.json
+cmake --preset=vcpkg -DCMAKE_BUILD_TYPE=Release -DSSP4SIM_BUILD_PYTHON_API=ON
+cmake --build build
+pip install -e ./build/public/python_api
+```
+
+Full source-build instructions, including the container workflow and test
+commands, are in [Build From Source](docs/build_from_source.md).
+
+## Quick Start
+
+From a source checkout, run the built CLI against the bundled example config
+(the example references files under `resources/`):
+
+```bash
+./build/public/ssp4sim_app/sim_app ./resources/embrace/embrace.json
+```
+
+After installing a release tarball, add its `bin/` directory to `PATH` and pass
+a config file of your own; the tarball does not install `resources/`:
+
+```bash
+export PATH="$HOME/.local/opt/ssp4sim/bin:$PATH"
+sim_app /path/to/config.json
 ```
 
 Or use the Python API:
@@ -26,6 +57,19 @@ sim = pyssp4sim.Simulator("./resources/embrace/embrace.json")
 sim.init()
 sim.simulate()
 ```
+
+## Tests And Lint
+
+```bash
+ctest --test-dir build --output-on-failure -j   # canonical C++ runner
+pytest -q tests/python                          # Python API (after the build above)
+tests/run_unit.sh --tier T1                     # focused C++ unit tier
+```
+
+Test layout and expected failures are in [tests/README.md](tests/README.md).
+No Python linter or formatter is configured in this repository (there is no
+`ruff.toml` or lint section in a Python project file); match the surrounding
+C++ style described in [docs/development.md](docs/development.md).
 
 ## Documentation
 
@@ -41,6 +85,7 @@ For structured per-layer documentation, see the [breakdown](docs/breakdown/) dir
 - [Release pipeline](docs/linux_binary_distribution.md): Linux binary and wheel packaging.
 - [Profiling](docs/profiling.md): build and runtime profiling commands.
 - [Logging](docs/logging_guidlines.md): logging tiers, hot-path logging, and sink notes.
+- [AGENTS.md](AGENTS.md): agent-specific repository guidelines and quick commands.
 
 ## Contributing
 
