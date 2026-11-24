@@ -17,7 +17,7 @@ namespace
 
     fs::path smoke_ssp_root()
     {
-        return ssp4sim::tests::reference_ssp::fixture_root("pyfmu_csv_source_sink");
+        return ssp4sim::tests::reference_ssp::fixture_root("pyfmi_csv_source_sink");
     }
 
     fs::path runtime_smoke_ssp_root(const fs::path &workdir)
@@ -119,7 +119,7 @@ namespace
 // ---------------------------------------------------------------------------
 TEST_CASE("Simulator smoke test runs one complete unpacked SSP", "[high_level][smoke]")
 {
-    const auto workdir = ssp4sim::tests::reference_ssp::project_root() / "build" / "test_cpp_high_level" / "pyfmu_csv_source_sink";
+    const auto workdir = ssp4sim::tests::reference_ssp::project_root() / "build" / "test_cpp_high_level" / "pyfmi_csv_source_sink";
     const auto config_path = write_smoke_config(workdir);
 
     ssp4sim::Simulator simulator(config_path.string());
