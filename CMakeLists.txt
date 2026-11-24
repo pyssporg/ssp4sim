@@ -86,7 +86,7 @@ endif()
 
 install(
   FILES
-    ${CMAKE_SOURCE_DIR}/readme.md
+    ${CMAKE_SOURCE_DIR}/README.md
     ${CMAKE_SOURCE_DIR}/LICENSE
   DESTINATION .
 )
