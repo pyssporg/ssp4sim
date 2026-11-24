@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyssp4sim"
-version = "0.3.5"
+version = "0.3.6"
 description = "SSP4SIM abi3 binary module"
 requires-python = ">=3.9"
 authors = [{ name = "Erik Rosenlund" }]
