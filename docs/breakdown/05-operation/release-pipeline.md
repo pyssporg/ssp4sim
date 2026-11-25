@@ -16,6 +16,7 @@ The release pipeline builds, packages, and publishes the Linux tarball and Pytho
   - `pyssp4sim-<version>-*.whl` plus a dev alias.
   - Tarball contents: bin/, lib/, include/, python/, resources/, README.md, LICENSE, RELEASE.txt.
 - **CI build and test:** the workflow runs on ubuntu-22.04, builds the Ubuntu 22.04 + GCC 13 container from `containers/ubuntu22-gcc13/Containerfile`, and runs configure, build, test, install, and packaging inside it with the same commands as the build-from-source and test docs.
+- **Pre-release validation:** `.github/workflows/tests.yml` runs the same container build plus `ctest` and the Python API suite on every push to `main` and on pull requests; it publishes nothing and never triggers on tags.
 - **Staging:** CMake install rules copy build artifacts to a staging tree under `dist/`.
 - **Packaging:** creates tarball, wheel, aliases, and SHA256SUMS in `dist/`; RELEASE.txt records version, commit SHA, and UTC build timestamp.
 - **Publish:** on a push of a tag matching `v*`, publishes to GitHub Releases; on workflow_dispatch, uploads as build artifacts.

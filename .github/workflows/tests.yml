@@ -1,0 +1,69 @@
+name: Tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build and test
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      # Same container as the release job so PR builds use the verified
+      # Ubuntu 22.04 + GCC 13 toolchain (see resources/containers).
+      - name: Build project container image
+        run: ./resources/containers/build_ubuntu22_gcc13_container.sh
+
+      - name: Configure
+        run: |
+          ./resources/containers/run_ubuntu22_gcc13_container.sh -- \
+            /bin/bash -lc 'cmake --preset=vcpkg -DCMAKE_BUILD_TYPE=Release -DSSP4SIM_BUILD_TEST=ON -DSSP4SIM_BUILD_PYTHON_API=ON'
+
+      - name: Build
+        run: |
+          ./resources/containers/run_ubuntu22_gcc13_container.sh -- \
+            cmake --build build --config Release
+
+      - name: Run C++ tests
+        run: |
+          ./resources/containers/run_ubuntu22_gcc13_container.sh -- \
+            ctest --test-dir build --output-on-failure -j
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python API and test dependencies
+        run: |
+          python -m venv venv
+          venv/bin/pip install --upgrade pip
+          venv/bin/pip install -r requirements.txt
+
+      # The prebuilt CsvSource FMU from the pyfmi_csv fixture leaves the
+      # interpreter unable to load a later Hopsan FMU in the same process
+      # (heap corruption surfaces as a SIGSEGV in the next model's libstdc++
+      # locale path). Run that one case in its own process so the rest of the
+      # reference sweep stays covered.
+      - name: Run Python API tests
+        run: |
+          venv/bin/python -m pytest -q tests/python \
+            --deselect 'tests/python/high_level/test_reference_sweep.py::test_reference_ssp_fully_simulates[pyfmi_csv_source_sink/baseline/model]'
+          venv/bin/python -m pytest -q \
+            'tests/python/high_level/test_reference_sweep.py::test_reference_ssp_fully_simulates[pyfmi_csv_source_sink/baseline/model]'
