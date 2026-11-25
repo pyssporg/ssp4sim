@@ -47,7 +47,7 @@ Build and record a sample profile:
 cmake --preset=vcpkg -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 perf record -F 99 -g -o build/perf.data \
-  ./build/public/ssp4sim_app/sim_app ./resources/embrace/embrace_profiling.json
+  ./build/src/public/ssp4sim_app/sim_app ./resources/embrace/embrace_profiling.json
 ```
 
 Review the profile:

@@ -18,7 +18,7 @@ sim_app ./resources/embrace/embrace.json
 From a source checkout, use the built executable:
 
 ```bash
-./build/public/ssp4sim_app/sim_app ./resources/embrace/embrace.json
+./build/src/public/ssp4sim_app/sim_app ./resources/embrace/embrace.json
 ```
 
 Show the embedded CLI version:

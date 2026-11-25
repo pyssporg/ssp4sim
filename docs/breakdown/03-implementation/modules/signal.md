@@ -16,5 +16,5 @@ Owns in-memory simulation data layout and the recording path; models read and wr
 - **Sinks:** `CsvRecorderSink` rows coalesced by timestamp across storages, the default backend; `SqliteWALRecorderSink` uses WAL journal mode for concurrent readers, per-storage tables `{run_id}_{model}_{storage_name}`, default auto-named `{epoch_seconds}_{session_uuid}.sqlite`, opt-in shared-file mode via `sqlite.file` config — sequential-only.
 - **Event path:** model push, storage flags new data, recorder copy, `BoundedMpscEventQueue` (multi-producer single-consumer), sink processing; bounded — 50 areas per storage and a 4096-event queue — with optional backpressure.
 - **Ownership:** the recorder holds an explicit copy, no shared memory with the simulation; the data flow is described in `INFO-013`.
-- **Include boundary:** `lib/include/signal/` (8 files) plus `lib/include/signal/sinks/` (7 files).
+- **Include boundary:** `src/lib/include/signal/` (8 files) plus `src/lib/include/signal/sinks/` (7 files).
 - **Dependencies:** `utils/` (RingBuffer, memory allocation).

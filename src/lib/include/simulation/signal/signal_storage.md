@@ -7,7 +7,7 @@ variables plus optional interpolation derivative slots, laid out in contiguous
 memory for fast access and easy export.
 
 - Namespace: `ssp4sim::signal`
-- Header: `lib/include/simulation/signal/storage.hpp`
+- Header: `src/lib/include/simulation/signal/storage.hpp`
 - Backing store: one `ssp4sim::utils::RingBuffer` per `SignalStorage`
   (see [`ring_buffer.md`](../../utils/primitives/ring_buffer.md)).
 - Implements: `types::IWritable` (i.e. supplies `to_string()`).

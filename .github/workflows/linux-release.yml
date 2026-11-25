@@ -37,7 +37,7 @@ jobs:
       - name: Verify Python API artifact exists
         run: |
           ./resources/containers/run_ubuntu22_gcc13_container.sh -- \
-            ls -l build_cont/public/python_api/pyssp4sim
+            ls -l build_cont/src/public/python_api/pyssp4sim
 
       - name: Run tests
         run: |

@@ -8,7 +8,7 @@ for ordering. It backs `SignalStorage` (see
 used internally by the recorder for back-pressure buffering.
 
 - Namespace: `ssp4sim::utils`
-- Header: `lib/include/utils/primitives/ring_buffer.hpp`
+- Header: `src/lib/include/utils/primitives/ring_buffer.hpp`
 - Implements: `types::IWritable` (i.e. supplies `to_string()`).
 
 ## General design

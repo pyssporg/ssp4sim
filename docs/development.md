@@ -29,11 +29,11 @@ Kernel, parser, and analysis/graph tests under `tests/lib/` are standalone
 per-test executables (`test_<name>`) whose sources are computed at configure
 time as the transitive include cone of the test file. The cone rule relies on
 the invariant that implementation `.cpp` files sit adjacent to their `.hpp`
-under `lib/include/**` in normalized layout; keep that invariant when adding
+under `src/lib/include/**` in normalized layout; keep that invariant when adding
 implementation files. Do not hand-maintain cone lists — new test files are
 picked up automatically. Integration tests (full-pipeline dependencies) are
 listed explicitly in `SSP4SIM_INTEGRATION_TESTS` in `tests/lib/CMakeLists.txt`
-and remain in the retained `ssp4sim_tests` binary. A bug in one `lib/` file
+and remain in the retained `ssp4sim_tests` binary. A bug in one `src/lib/` file
 therefore blocks only the tests whose cones reach it.
 
 ## Coding Style
@@ -42,11 +42,11 @@ therefore blocks only the tests whose cones reach it.
 - Class names use `PascalCase`; functions and files generally use
   `snake_case`.
 - Keep includes ordered and local headers grouped consistently with nearby
-  files under `lib/include/**`.
+  files under `src/lib/include/**`.
 - No enforced formatter is checked in; match surrounding style closely.
 - Keep changes direct and explicit. Minimize duplication, but do not introduce
   abstractions that hide important simulation or memory-layout details.
-- Prefer repository-owned code in `lib/`, `public/`, `tests/`, `resources/`,
+- Prefer repository-owned code in `src/lib/`, `src/public/`, `tests/`, `resources/`,
   and `resources/scripts/` over patching vendored dependencies in `3rdParty/`, unless
   the task is explicitly about vendored behavior.
 - Treat this as active experimental software: clear root-cause fixes are
@@ -76,7 +76,7 @@ LinearSubstepExecutor -> FmuModel`). When composing a stack:
 
 - **Configuration is parsed once, centrally; options are nested.** The
   `SharedConfig` constructor and `ssp4sim::ExecutorOptions::load()`
-  (`lib/public_include/shared_config.hpp`) are the only places that read the
+  (`src/lib/public_include/shared_config.hpp`) are the only places that read the
   global `utils::Config`. Option structs are *nested* so each layer passes its
   slice straight through — no local re-aggregation:
   `SharedConfig::executor` is the `ssp4sim::ExecutorOptions`

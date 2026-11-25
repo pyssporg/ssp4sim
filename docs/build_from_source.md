@@ -32,7 +32,7 @@ Success criteria:
 
 - `cmake --build build` completes without errors.
 - `./build/tests/lib/ssp4sim_tests` exits successfully.
-- `./build/public/ssp4sim_app/sim_app ./resources/embrace/embrace.json`
+- `./build/src/public/ssp4sim_app/sim_app ./resources/embrace/embrace.json`
   produces a result artifact at the configured output path.
 
 ## Prepare A Source Build Environment
@@ -153,7 +153,7 @@ See tests/README.md for the test architecture and tier matrix.
 The C++ test target is enabled by default (`SSP4SIM_BUILD_TEST=ON`). Keep it on,
 or pass `-DSSP4SIM_BUILD_TEST=ON` explicitly, then rebuild. C++ tests come in
 two shapes: per-test unit binaries
-(`test_<name>`, each built from its own include cone under `lib/include/**`) and
+(`test_<name>`, each built from its own include cone under `src/lib/include/**`) and
 the retained integration binary `ssp4sim_tests`. CTest is the canonical runner:
 
 ```bash
@@ -175,13 +175,13 @@ More test-suite detail is in [tests/README.md](../tests/README.md).
 
 Use the same Python version for CMake and `pip`. The Python API requires a
 Release build. The package version is the static `version` in
-`public/python_api/pyproject.toml` (currently `0.3.5`; it is not derived from
+`src/public/python_api/pyproject.toml` (currently `0.3.5`; it is not derived from
 Git tags), and the native module targets the CPython Limited API
 (`Py_LIMITED_API=0x03090000`) to produce an `abi3` extension.
 
 The Python package does not exist at the repository root; CMake generates it
-under `build/public/python_api`. `requirements.txt` ends with
-`-e build/public/python_api/`, so build before installing requirements, or
+under `build/src/public/python_api`. `requirements.txt` ends with
+`-e build/src/public/python_api/`, so build before installing requirements, or
 install the runtime/test dependencies and the built package separately:
 
 ```bash
@@ -194,7 +194,7 @@ cmake --build build
 pip install -r ./requirements.txt   # numpy, pandas, matplotlib, pytest, and this package
 # Or separately:
 # pip install numpy pandas matplotlib pytest
-# pip install -e ./build/public/python_api
+# pip install -e ./build/src/public/python_api
 ```
 
 Run Python tests after the Python API has been built:
@@ -233,7 +233,7 @@ entry point, use a version script instead:
 Verify after a build that the static runtime's state is no longer exported:
 
 ```bash
-nm -D --defined-only build/public/python_api/py_ssp4sim.abi3.so \
+nm -D --defined-only build/src/public/python_api/py_ssp4sim.abi3.so \
   | grep -E ' (__cxa_|_Unwind_|_Znwm|_ZdlPv|_ZGVNSt)'
 # expected: no output
 ```

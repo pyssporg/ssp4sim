@@ -358,7 +358,7 @@ Everything inside `pre/` uses relative-to-pre include paths:
 
 External consumers (`simulation.cpp`, tests) include via `"pre/..."`.
 
-The `CMakeLists.txt` in `lib/` adds `lib/include` as a private include directory — this is sufficient since all `pre/` files live under `lib/include/pre/`.
+The `CMakeLists.txt` in `src/lib/` adds `src/lib/include` as a private include directory — this is sufficient since all `pre/` files live under `src/lib/include/pre/`.
 
 ---
 

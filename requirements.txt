@@ -3,4 +3,4 @@ numpy
 pandas
 matplotlib
 pytest
--e build/public/python_api/
+-e build/src/public/python_api/

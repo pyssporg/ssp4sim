@@ -3,11 +3,11 @@
 # Each unit test (<basename>.cpp) is compiled into its own executable together
 # with the transitive include cone of its implementation sources. A test's
 # executable therefore only builds the code it actually exercises; a broken
-# implementation file elsewhere in lib/ no longer blocks kernel/parser/graph
+# implementation file elsewhere in src/lib/ no longer blocks kernel/parser/graph
 # tests from compiling and linking.
 #
 # The cone rule relies on one invariant: implementation .cpp files sit adjacent
-# to their .hpp under lib/include/** (normalized layout). Include resolution is
+# to their .hpp under src/lib/include/** (normalized layout). Include resolution is
 # soft: an include that cannot be resolved against the include set is treated as
 # an external/system header and skipped. A wrong guess manifests as a per-binary
 # link-time undefined reference, never a silent wrong cone.
@@ -16,29 +16,29 @@ include_guard(GLOBAL)
 
 # Include search set shared with ssp4sim_lib and the retained integration binary.
 set(SSP4SIM_TEST_INCLUDE_DIRS
-  "${CMAKE_SOURCE_DIR}/lib/include"
-  "${CMAKE_SOURCE_DIR}/lib/include/pre"
-  "${CMAKE_SOURCE_DIR}/lib/include/pre/1_ssp_parser"
-  "${CMAKE_SOURCE_DIR}/lib/include/pre/1_ssp_parser/elements"
-  "${CMAKE_SOURCE_DIR}/lib/include/pre/1_ssp_parser/schema_extensions"
-  "${CMAKE_SOURCE_DIR}/lib/include/pre/2_analysis_graph"
-  "${CMAKE_SOURCE_DIR}/lib/include/pre/2_analysis_graph/elements"
-  "${CMAKE_SOURCE_DIR}/lib/include/pre/3_simulation_graph"
-  "${CMAKE_SOURCE_DIR}/lib/include/pre/3_simulation_graph/elements"
-  "${CMAKE_SOURCE_DIR}/lib/include/simulation"
-  "${CMAKE_SOURCE_DIR}/lib/include/simulation/executor"
-  "${CMAKE_SOURCE_DIR}/lib/include/simulation/resolver"
-  "${CMAKE_SOURCE_DIR}/lib/include/simulation/signal"
-  "${CMAKE_SOURCE_DIR}/lib/include/simulation/signal/sinks"
-  "${CMAKE_SOURCE_DIR}/lib/include/utils"
-  "${CMAKE_SOURCE_DIR}/lib/include/utils/fmi"
-  "${CMAKE_SOURCE_DIR}/lib/include/utils/graph"
-  "${CMAKE_SOURCE_DIR}/lib/include/utils/io"
-  "${CMAKE_SOURCE_DIR}/lib/include/utils/memory"
-  "${CMAKE_SOURCE_DIR}/lib/include/utils/primitives"
-  "${CMAKE_SOURCE_DIR}/lib/include/utils/thread_pool"
-  "${CMAKE_SOURCE_DIR}/lib/include/utils/time"
-  "${CMAKE_SOURCE_DIR}/lib/public_include"
+  "${CMAKE_SOURCE_DIR}/src/lib/include"
+  "${CMAKE_SOURCE_DIR}/src/lib/include/pre"
+  "${CMAKE_SOURCE_DIR}/src/lib/include/pre/1_ssp_parser"
+  "${CMAKE_SOURCE_DIR}/src/lib/include/pre/1_ssp_parser/elements"
+  "${CMAKE_SOURCE_DIR}/src/lib/include/pre/1_ssp_parser/schema_extensions"
+  "${CMAKE_SOURCE_DIR}/src/lib/include/pre/2_analysis_graph"
+  "${CMAKE_SOURCE_DIR}/src/lib/include/pre/2_analysis_graph/elements"
+  "${CMAKE_SOURCE_DIR}/src/lib/include/pre/3_simulation_graph"
+  "${CMAKE_SOURCE_DIR}/src/lib/include/pre/3_simulation_graph/elements"
+  "${CMAKE_SOURCE_DIR}/src/lib/include/simulation"
+  "${CMAKE_SOURCE_DIR}/src/lib/include/simulation/executor"
+  "${CMAKE_SOURCE_DIR}/src/lib/include/simulation/resolver"
+  "${CMAKE_SOURCE_DIR}/src/lib/include/simulation/signal"
+  "${CMAKE_SOURCE_DIR}/src/lib/include/simulation/signal/sinks"
+  "${CMAKE_SOURCE_DIR}/src/lib/include/utils"
+  "${CMAKE_SOURCE_DIR}/src/lib/include/utils/fmi"
+  "${CMAKE_SOURCE_DIR}/src/lib/include/utils/graph"
+  "${CMAKE_SOURCE_DIR}/src/lib/include/utils/io"
+  "${CMAKE_SOURCE_DIR}/src/lib/include/utils/memory"
+  "${CMAKE_SOURCE_DIR}/src/lib/include/utils/primitives"
+  "${CMAKE_SOURCE_DIR}/src/lib/include/utils/thread_pool"
+  "${CMAKE_SOURCE_DIR}/src/lib/include/utils/time"
+  "${CMAKE_SOURCE_DIR}/src/lib/public_include"
   "${CMAKE_SOURCE_DIR}/tests/lib"
 )
 
@@ -206,7 +206,7 @@ function(ssp4sim_cone_audit)
     ssp4sim_compute_cone(_cone "${_test}" _unresolved)
     math(EXPR _test_count "${_test_count} + 1")
     foreach(_f IN LISTS _cone)
-      if(_f MATCHES "\\.cpp$" AND _f MATCHES "/lib/include/")
+      if(_f MATCHES "\\.cpp$" AND _f MATCHES "/src/lib/include/")
         math(EXPR _lib_sources "${_lib_sources} + 1")
       endif()
     endforeach()

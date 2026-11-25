@@ -15,7 +15,7 @@ def find_upwards(start: Path, target: str) -> Path:
 
 
 SSP4SIM_ROOT = find_upwards(Path(__file__), "__SSP4SIM_ROOT__")
-PYTHON_API_BUILD = SSP4SIM_ROOT / "build" / "public" / "python_api"
+PYTHON_API_BUILD = SSP4SIM_ROOT / "build" / "src" / "public" / "python_api"
 
 if PYTHON_API_BUILD.exists():
     sys.path.insert(0, str(PYTHON_API_BUILD))

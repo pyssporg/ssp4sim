@@ -2,7 +2,7 @@
 
 ## Status / Context
 
-This document satisfies **IMP-028** (Restructure Thread Pools with Tradeoff Documentation). It describes the two thread pool implementations available in `lib/include/utils/`, their design differences, and when to choose each.
+This document satisfies **IMP-028** (Restructure Thread Pools with Tradeoff Documentation). It describes the two thread pool implementations available in `src/lib/include/utils/`, their design differences, and when to choose each.
 
 ## Overview
 
@@ -51,13 +51,13 @@ Two thread pool implementations coexist in the utility layer, each targeting a d
 
 ## Build Linkage
 
-Both pools are compiled directly into the `ssp4sim_lib` target. The `lib/CMakeLists.txt` file uses:
+Both pools are compiled directly into the `ssp4sim_lib` target. The `src/lib/CMakeLists.txt` file uses:
 
 ```cmake
 file(GLOB_RECURSE ALL_SRC CONFIGURE_DEPENDS "*.hpp" "*.cpp")
 ```
 
-This picks up every `.hpp` and `.cpp` file under `lib/`, including both pool implementations. There is **no separate CMake target** for either pool.
+This picks up every `.hpp` and `.cpp` file under `src/lib/`, including both pool implementations. There is **no separate CMake target** for either pool.
 
 **Header paths** (from any consumer in the project):
 

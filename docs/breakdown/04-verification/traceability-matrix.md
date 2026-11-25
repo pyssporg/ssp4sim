@@ -22,7 +22,7 @@ Maps each product requirement to its verification coverage: test locations and k
 | REQ-004 | CSV output with sample interval | `tests/lib/core/test_data_recorder.cpp`, `tests/lib/high_level/` | Partial | Recorder unit test exists; CSV format not tested in isolation |
 | REQ-005 | Local database output with per-storage tables | `tests/lib/core/test_sqlite_recorder.cpp`, `tests/lib/high_level/` | Partial | DuckDB recorder removed; acceptance is all SQLite (per-simulation WAL files, optional shared-file mode); WAL concurrency covered in the recorder unit tests |
 | REQ-006 | Local logging with levels and sinks | (none) | Partial | Logging implemented (ssp4cpp::utils::log); dedicated log tests missing — TEST gap, not code gap |
-| REQ-007 | Distributed observability with OpenTelemetry | (none) | Missing | Feature not implemented in code — PRODUCT gap (no opentelemetry references in lib/) |
+| REQ-007 | Distributed observability with OpenTelemetry | (none) | Missing | Feature not implemented in code — PRODUCT gap (no opentelemetry references in src/lib/) |
 
 **Untraced:** REQ-009 through REQ-015 exist in the requirements folder but have no matrix rows yet.
 

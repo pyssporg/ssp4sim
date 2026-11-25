@@ -67,12 +67,12 @@ message("CMAKE_CXX_FLAGS: ${CMAKE_CXX_FLAGS}\n")
 
 # Subdirectories
 
-add_subdirectory(lib)
+add_subdirectory(src/lib)
 
 # Public artifacts
-add_subdirectory(public/ssp4sim_app)
+add_subdirectory(src/public/ssp4sim_app)
 if(SSP4SIM_BUILD_PYTHON_API)
-  add_subdirectory(public/python_api)
+  add_subdirectory(src/public/python_api)
 endif()
 
 # Tests

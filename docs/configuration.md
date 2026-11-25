@@ -99,7 +99,7 @@ For CLI and Python invocation examples, see [Usage](usage.md).
 Notes:
 - All `simulation.executor.*` keys are parsed exactly once, centrally, by
   `ssp4sim::ExecutorOptions::load()` (called from the `SharedConfig`
-  constructor in `lib/public_include/shared_config.hpp`); `simulation.realtime`
+  constructor in `src/lib/public_include/shared_config.hpp`); `simulation.realtime`
   (paces the outer `MacroExecutor` macro steps), `simulation.tolerance`,
   `simulation.executor.forward_derivatives`, `simulation.log.fmu` and the
   experiment times (`simulation.start_time` / `simulation.timestep` /

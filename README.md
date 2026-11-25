@@ -21,12 +21,12 @@ and uses [Quill](https://github.com/odygrd/quill) for logging.
 Release tarballs and wheels are described in
 [Installation](docs/installation.md). A source checkout is not installed from
 the repository root: build first, then install the generated Python package
-from `build/public/python_api`:
+from `build/src/public/python_api`:
 
 ```bash
 cmake --preset=vcpkg -DCMAKE_BUILD_TYPE=Release -DSSP4SIM_BUILD_PYTHON_API=ON
 cmake --build build
-pip install -e ./build/public/python_api
+pip install -e ./build/src/public/python_api
 ```
 
 Full source-build instructions, including the container workflow and test
@@ -38,7 +38,7 @@ From a source checkout, run the built CLI against the bundled example config
 (the example references files under `resources/`):
 
 ```bash
-./build/public/ssp4sim_app/sim_app ./resources/embrace/embrace.json
+./build/src/public/ssp4sim_app/sim_app ./resources/embrace/embrace.json
 ```
 
 After installing a release tarball, add its `bin/` directory to `PATH` and pass

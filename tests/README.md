@@ -39,9 +39,9 @@ The C++ tests under `tests/lib/` are split into two build shapes:
 
 - **Per-test unit binaries** (`test_<name>`): kernel, parser, and analysis/graph
   tests are compiled into their own executables, built only from their own
-  transitive include cone under `lib/include/**` (implementation files sit
+  transitive include cone under `src/lib/include/**` (implementation files sit
   adjacent to their headers, so the cone is resolved mechanically). A broken
-  implementation file anywhere else in `lib/` no longer blocks these tests from
+  implementation file anywhere else in `src/lib/` no longer blocks these tests from
   building; one unit binary = one test = one clear result.
 - **Retained integration binary** (`ssp4sim_tests`): tests that legitimately
   depend on the full pipeline (`tests/lib/high_level/`, sim/graph model
@@ -180,7 +180,7 @@ Two fixtures are known hard failures in the sweep and are pinned as strict
   implements today. See
   `resources/reference_ssp/models/ssp/signal_init_loop_guard/FIXTURE.md`.
 
-The Python tests import `pyssp4sim` from `build/public/python_api` when that
+The Python tests import `pyssp4sim` from `build/src/public/python_api` when that
 build artifact exists. This prevents high-level tests from accidentally passing
 against an unrelated installed wheel.
 

@@ -54,7 +54,7 @@ cmake --preset=vcpkg
 cmake --build build
 ctest --test-dir build --output-on-failure -j   # canonical C++ test runner
 tests/run_unit.sh --tier T1                     # focused unit tier (T1/T2/T3)
-pip install -e ./build/public/python_api        # Python API; never pip install the repo root
+pip install -e ./build/src/public/python_api        # Python API; never pip install the repo root
 pytest -q tests/python
 ```
 

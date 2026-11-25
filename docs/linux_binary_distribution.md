@@ -50,9 +50,9 @@ cmake --install build --prefix dist/ssp4sim
 
 Install rules are defined in:
 - [`CMakeLists.txt`](../CMakeLists.txt)
-- [`lib/CMakeLists.txt`](../lib/CMakeLists.txt)
-- [`public/ssp4sim_app/CMakeLists.txt`](../public/ssp4sim_app/CMakeLists.txt)
-- [`public/python_api/CMakeLists.txt`](../public/python_api/CMakeLists.txt)
+- [`src/lib/CMakeLists.txt`](../src/lib/CMakeLists.txt)
+- [`src/public/ssp4sim_app/CMakeLists.txt`](../src/public/ssp4sim_app/CMakeLists.txt)
+- [`src/public/python_api/CMakeLists.txt`](../src/public/python_api/CMakeLists.txt)
 
 ## Stage 4: Package artifacts
 
