@@ -1,5 +1,7 @@
 #pragma once
 
+#include "c_api_common.h"
+
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -7,16 +9,6 @@ extern "C" {
 #endif
 
 typedef struct ssp4sim_simulator_handle ssp4sim_simulator_handle;
-
-typedef int ssp4sim_status;
-
-enum
-{
-    SSP4SIM_STATUS_OK = 0,
-    SSP4SIM_STATUS_INVALID_ARGUMENT = 1,
-    SSP4SIM_STATUS_RUNTIME_ERROR = 2,
-    SSP4SIM_STATUS_OUT_OF_MEMORY = 3
-};
 
 typedef enum
 {
@@ -123,10 +115,6 @@ ssp4sim_status ssp4sim_simulator_wait(ssp4sim_simulator_handle *handle,
                                       ssp4sim_run_result *result);
 
 void ssp4sim_simulator_destroy(ssp4sim_simulator_handle *handle);
-
-/* Thread-local message for the last failing call on this thread. The pointer
- * is invalidated by the next ssp4sim_simulator_* call on the same thread. */
-const char *ssp4sim_last_error(void);
 
 #ifdef __cplusplus
 }

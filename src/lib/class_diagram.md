@@ -1,11 +1,7 @@
 classDiagram
 
 class Simulator {
-  +engine: std::unique_ptr<SimulationEngine>
-  +run_mutex: std::mutex
-  +run_thread: std::thread
-  +run_future: std::shared_future<RunResult>
-  +run_started: bool
+  +runner: std::unique_ptr<ThreadedRunner>
   +Simulator(config)
   +init()
   +simulate()
@@ -14,7 +10,21 @@ class Simulator {
   +wait()
 }
 
-class SimulationEngine {
+class ThreadedRunner {
+  +stepper: std::unique_ptr<SimulationStepper>
+  +control: std::shared_ptr<control::RunControl>
+  +run_mutex: std::mutex
+  +run_thread: std::thread
+  +run_future: std::shared_future<RunResult>
+  +run_started: bool
+  +start()
+  +run(): RunResult
+  +info() RunInfo
+}
+
+note for ThreadedRunner "run() owns the outer macro-step loop: calls RunControl::before_slice(), SimulationStepper::step(), RunControl::publish_boundary(), then flushes and finalizes through RunControl::finish()"
+
+class SimulationStepper {
   +ssp: std::unique_ptr<Ssp>
   +conf: std::unique_ptr<SharedConfig>
   +session_uuid: std::string
@@ -22,13 +32,14 @@ class SimulationEngine {
   +sim: pre::SimulationData
   +recorder: std::unique_ptr<signal::DataRecorder>
   +simulation_node: std::shared_ptr<graph::Invocable>
-  +control: std::shared_ptr<control::RunControl>
   +init()
-  +run(): RunResult
-  +info() RunInfo
+  +start()
+  +step(): StepStatus
+  +advance_to(target): StepStatus
+  +sim_time_ns() uint64_t
+  +end_time_ns() uint64_t
+  +finish()
 }
-
-note for SimulationEngine "run() owns the outer macro-step loop: slices by the configured timestep, calls RunControl::before_slice() at each slice top, and publishes the last completed boundary before finalizing with RunControl::finish()"
 
 class RunControl {
   +mutex_: std::mutex
@@ -179,15 +190,16 @@ class RunInfo {
   }
 
 
-Simulator *-- SimulationEngine
-SimulationEngine *-- RunControl
-SimulationEngine ..> RunInfo
+Simulator *-- ThreadedRunner
+ThreadedRunner *-- RunControl
+ThreadedRunner *-- SimulationStepper
+ThreadedRunner ..> RunInfo
 Simulator ..> RunInfo
-SimulationEngine *-- FmuHandler
-SimulationEngine *-- DataRecorder
-SimulationEngine *-- Graph
-SimulationEngine *--  GraphBuilder
-SimulationEngine *--  AnalysisGraphBuilder
+SimulationStepper *-- FmuHandler
+SimulationStepper *-- DataRecorder
+SimulationStepper *-- Graph
+SimulationStepper *-- GraphBuilder
+SimulationStepper *--  AnalysisGraphBuilder
 AnalysisGraph --> GraphBuilder
 
 FmuHandler *-- "many" FmuInfo

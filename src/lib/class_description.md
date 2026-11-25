@@ -1,11 +1,15 @@
 classDiagram
 
 class Simulator {
-    Public lifecycle facade: owns the internal run thread and forwards setup, control, and queries to the engine; start() blocks until running or terminal.
+    Public compatibility facade over ThreadedRunner: owns setup, control, and query access; start() blocks until running or terminal.
 }
 
-class SimulationEngine {
-    Owns SSP import, the simulation graph, executors, recorder, and run control; runs the outer macro-step loop on the calling thread, slicing by the configured timestep, driving RunControl pacing via before_slice(), publishing the last completed boundary, and finalizing through RunControl::finish().
+class ThreadedRunner {
+    Owns the only async layer: worker thread, command queue, pacing, RunState including Stopping, start barrier, wait, and terminal result. Drives SimulationStepper and RunControl.
+}
+
+class SimulationStepper {
+    Synchronous core: owns SSP import, graph, executors, recorder, simulation time, and one macro step; no thread, pacing, RunState, or command queue.
 }
 
 class RunControl {
@@ -73,13 +77,14 @@ class SignalStorage {
     Allocates contiguous memory areas and metadata for stored signals.
 }
 
-Simulator *-- SimulationEngine
-SimulationEngine *-- RunControl
-SimulationEngine *-- FmuHandler
-SimulationEngine *-- DataRecorder
-SimulationEngine *-- Graph
-SimulationEngine *--  GraphBuilder
-SimulationEngine *--  AnalysisGraphBuilder
+Simulator *-- ThreadedRunner
+ThreadedRunner *-- RunControl
+ThreadedRunner *-- SimulationStepper
+SimulationStepper *-- FmuHandler
+SimulationStepper *-- DataRecorder
+SimulationStepper *-- Graph
+SimulationStepper *--  GraphBuilder
+SimulationStepper *--  AnalysisGraphBuilder
 AnalysisGraph --> GraphBuilder
 
 FmuHandler *-- "many" FmuInfo

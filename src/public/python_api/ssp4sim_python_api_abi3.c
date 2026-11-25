@@ -1,7 +1,7 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
-#include "simulator_c_api.h"
+#include "c_api/simulator_c_api.h"
 
 #include <math.h>
 #include <stdint.h>

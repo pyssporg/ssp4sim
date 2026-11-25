@@ -106,7 +106,7 @@ prepared `SharedConfig` built by `from_file`, `from_string`, or `from_json`:
 
 ```cpp
 #include "shared_config.hpp"
-#include "simulator.hpp"
+#include "cpp_api/simulator.hpp"
 
 ssp4sim::Simulator from_file("./resources/embrace/embrace.json");
 
@@ -133,6 +133,25 @@ Each `Simulator` owns its configuration, so several instances in one process can
 run with different configurations. Two limits remain process-wide: logging sinks
 are configured globally, and the SSP is still loaded from the path in
 `simulation.ssp`, not from in-memory bytes.
+
+### Synchronous C++ API
+
+`cpp_api/stepper.hpp` exposes `SimulationStepper` directly. It has no worker
+thread, pacing, pause, or speed: callers drive time with `step()` or
+`advance_to(target_ns)`, read `sim_time_ns()`/`end_time_ns()`, and call
+`finish()` to flush recording. This is the C++ counterpart of the synchronous
+C ABI and the intended core for future FMU/embedded wrappers.
+
+```cpp
+#include "cpp_api/stepper.hpp"
+
+ssp4sim::SimulationStepper stepper(std::move(config));
+stepper.init();
+stepper.start();
+while (stepper.step() == ssp4sim::StepStatus::Advanced) {
+}
+stepper.finish();
+```
 
 ## Python API
 
@@ -169,7 +188,7 @@ runtime control in addition to the one-shot `init()` / `simulate()` flow.
 `simulate()` is exactly `start()` followed by `wait()`; its blocking behaviour
 and exception mapping are unchanged.
 
-| Operation | C++ | C ABI (`simulator_c_api.h`) | Python |
+| Operation | C++ | C ABI (`c_api/simulator_c_api.h`) | Python |
 |---|---|---|---|
 | Initialize | `init()` | `ssp4sim_simulator_init` | `init()` |
 | Start | `start()` (blocks until running or terminal) | `ssp4sim_simulator_start` | `start()` |
@@ -232,9 +251,36 @@ print(sim.wait())  # "completed" or "stopped"; raises on failure
 ```
 
 The C wrapper symbols are declared in
-[`simulator_c_api.h`](../src/lib/public_include/simulator_c_api.h);
+[`c_api/simulator_c_api.h`](../src/lib/public_include/c_api/simulator_c_api.h);
 `ssp4sim_simulator_destroy` releases the handle and
 `ssp4sim_last_error` returns the last error message.
+
+### Synchronous C API
+
+[`c_api/stepper_c_api.h`](../src/lib/public_include/c_api/stepper_c_api.h) exposes the
+internal `SimulationStepper` directly as `ssp4sim_stepper_*`. It has no worker
+thread, wall-clock pacing, pause, or speed: callers drive time with `step()`
+(one configured macro step) or `advance_to(target_ns)` (an exact target,
+clamped to the end time), read `sim_time_ns`/`end_time_ns` with `get_info()`,
+and call `finish()` to stop and flush the recorder. `destroy()` does not call
+`finish()`, so callers must call `finish()` first to flush recording. Both C
+ABIs share `c_api/c_api_common.h` (`ssp4sim_status` and `ssp4sim_last_error`).
+
+```c
+#include "c_api/stepper_c_api.h"
+
+ssp4sim_stepper_handle *stepper = NULL;
+if (ssp4sim_stepper_create("./config.json", &stepper) == SSP4SIM_STATUS_OK) {
+    ssp4sim_stepper_init(stepper);
+    ssp4sim_stepper_start(stepper);
+    ssp4sim_step_status status;
+    while (ssp4sim_stepper_step(stepper, &status) == SSP4SIM_STATUS_OK &&
+           status == SSP4SIM_STEP_ADVANCED) {
+    }
+    ssp4sim_stepper_finish(stepper);
+    ssp4sim_stepper_destroy(stepper);
+}
+```
 
 ## Control Daemon
 

@@ -1,6 +1,6 @@
 #include "protocol.hpp"
 
-#include "simulator_c_api.h"
+#include "c_api/simulator_c_api.h"
 
 #include <cmath>
 

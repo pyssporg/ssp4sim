@@ -22,10 +22,10 @@ model/  execution/  signal/ <-------------+
           |
           +--> utils/ (shared)
 
-engine/ (SimulationEngine::run)
-   +--> execution/  (time-step runner)
+runner/ (ThreadedRunner::run)
+   +--> stepper/    (SimulationStepper::step, one slice)
    +--> control/    (before_slice pacing, finalization)
 ```
 
-- **Entry points:** CLI `src/public/ssp4sim_app/`, Python `src/public/python_api/`, control daemon `src/public/ssp4sim_server/`, public headers `src/lib/public_include/`; build-target mapping is the build environment (`INFO-015`).
+- **Entry points:** CLI `src/public/ssp4sim_app/`, Python `src/public/python_api/`, control daemon `src/public/ssp4sim_server/`, public headers `src/lib/public_include/` (`cpp_api/`, `c_api/`, and shared C++ types); build-target mapping is the build environment (`INFO-015`).
 - **Module areas:** responsibilities and public interfaces are architected in the component view (`INFO-012`); this leaf holds layout and dependency direction only.

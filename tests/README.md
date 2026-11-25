@@ -23,8 +23,9 @@ The suite is split by layer so each test has a clear responsibility:
   (`test_run_control`).
 - `tests/lib/utils/`: C++ tests for utility data structures and support code.
 - `tests/lib/high_level/`: C++ smoke tests through the public simulator entry
-  point, including CSV recording and the C ABI control surface
-  (`test_c_api_control.cpp`).
+  point, including CSV recording and the threaded C ABI control surface
+  (`test_c_api_control.cpp`) and the synchronous C ABI stepper surface
+  (`test_stepper_c_api.cpp`).
 - `tests/python/high_level/`: Python API tests for full SSP workflows,
   result-file validation, and implemented runtime control
   (`test_runtime_control.py`).
@@ -120,7 +121,7 @@ same way.
 | T1 kernel/units | `tests/lib/core/`, `tests/lib/utils/`, `tests/lib/control/` | `test_mpsc_event_queue`, `test_node`, `test_node_iterator`, `test_ring_buffer`, `test_config`, `test_thread_pool`, `test_run_control` |
 | T2 parser | `tests/lib/core/` | `test_parameter_binding`, `test_schema_extensions`, `test_signal_storage`, `test_ssp_elements`, `test_start_value` |
 | T3 analysis/graph | `tests/lib/analysis/`, `tests/lib/core/` | `test_graph_builder`, `test_ssp_node`, `test_tree_builder`, `test_parameter_binding_integration` |
-| T4 integration | `tests/lib/high_level/`, `tests/lib/core/`, `tests/lib/graph/`, `tests/lib/model/`, `tests/lib/simulation/` | retained in `ssp4sim_tests`; includes `test_c_api_control.cpp` |
+| T4 integration | `tests/lib/high_level/`, `tests/lib/core/`, `tests/lib/graph/`, `tests/lib/model/`, `tests/lib/simulation/` | retained in `ssp4sim_tests`; includes `test_c_api_control.cpp` and `test_stepper_c_api.cpp` |
 
 `src/public/ssp4sim_server/test_ndjson.cpp` is a separate CTest target
 (`ssp4simd_ndjson`) built with `SSP4SIM_BUILD_TEST`; it is not part of the
@@ -249,6 +250,10 @@ Runtime control is covered at four levels:
 - `tests/lib/high_level/test_c_api_control.cpp` drives lifecycle, speed,
   coherent `info`, and the result-returning `wait` through the C ABI (retained in
   `ssp4sim_tests`).
+- `tests/lib/high_level/test_stepper_c_api.cpp` drives the synchronous stepper
+  C ABI (`create`, `init`, `start`, `step`, exact `advance_to`, `get_info`,
+  `finish`, `destroy`), including invalid arguments, pre-init transitions, and a
+  zero timestep (retained in `ssp4sim_tests`).
 - `tests/python/high_level/test_runtime_control.py` drives the Python
   `Simulator` control surface, including the blocking `start()`, the `wait()`
   result string, and the coherent `info()` read-back, and

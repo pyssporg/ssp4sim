@@ -1,7 +1,7 @@
 #pragma once
 
 #include "protocol.hpp"
-#include "simulator.hpp"
+#include "cpp_api/simulator.hpp"
 
 #include <chrono>
 #include <cstdint>

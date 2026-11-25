@@ -14,10 +14,18 @@ For detailed architecture information, see the [architecture layer](breakdown/02
 
 ## Control Modules
 
-Runtime control is split between the engine and a separate frontend:
+Runtime control is split between the synchronous core and the threaded runner:
 
-- `src/lib/include/simulation/control/`: `RunControl` (state machine and run
-  thread), command queue, and run state.
+- `src/lib/public_include/cpp_api/simulator.hpp`: threaded C++ facade
+  (`Simulator`).
+- `src/lib/public_include/cpp_api/stepper.hpp`: synchronous C++ core
+  (`SimulationStepper`).
+- `src/lib/public_include/c_api/`: threaded and synchronous C ABIs plus the
+  shared status/error header.
+- `src/lib/include/simulation/runner/threaded_runner.*`: the only async layer
+  (run thread, command queue, pacing, `RunState`, `wait`).
+- `src/lib/include/simulation/control/`: `RunControl` state machine, command
+  queue, and run state.
 - `src/lib/public_include/runtime_control.hpp`: public state/result enums,
   shared by the C++, C, and Python surfaces.
 - `src/public/ssp4sim_server/`: the `ssp4simd` frontend (`daemon`, Unix-domain
@@ -88,7 +96,7 @@ defaults for keys read from `utils::Config`.
 
 Executors nest: `ExecutorBase` is an `Invocable` whose children may themselves be
 executors (e.g. `SerialSeidel -> LinearSubstepExecutor -> FmuModel`). The
-engine owns the outer macro-step loop. When composing a stack:
+threaded runner owns the outer macro-step loop. When composing a stack:
 
 - **Configuration is parsed once, centrally; options are nested.** The
   `SharedConfig::from_file/from_string/from_json` factories and
@@ -116,12 +124,12 @@ engine owns the outer macro-step loop. When composing a stack:
   scans the registry and requires *exactly one* matching variant — no
   per-family branching: none match is a precise no-match error naming the
   method, more than one is an ambiguity error. The resolved factory builds the
-  specialized executor, which `build` returns directly. `SimulationEngine::run()`
-  owns the outer macro-step loop: it slices `[start_time, end_time]` by
-  `SharedConfig::fmu.timestep`, calls `RunControl::before_slice()` at each slice
-  top (pacing and due commands), invokes the executor on the slice, publishes
-  the last completed boundary before the recorder flush, and then
-  `RunControl::finish()` returns the effective result.
+  specialized executor, which `build` returns directly. `ThreadedRunner::run()`
+  owns the outer macro-step loop: it calls `RunControl::before_slice()` at each
+  slice top (pacing and due commands), calls `SimulationStepper::step()` for one
+  configured slice, publishes the completed boundary, and then flushes and
+  finalizes through `RunControl::finish()`. The synchronous `SimulationStepper`
+  owns slicing, graph invocation, recorder, and the final partial slice.
 - **la2 is a factory, not a class.** There is no `La2Scheduler` type;
   `make_la2_stack(nodes, La2Options)` (`executor/loop_aware/la2_builder.hpp`)
   is a config-free, pure construction function that SCC-partitions the graph,
@@ -180,7 +188,7 @@ Reusable building blocks that serve la2 but live outside it:
   sub-steps); `GeometricSubstepExecutor` owns its schedule construction
   (`build_schedule` static). Both sweep the group in parallel per sub-step; use
   them outside la2 to sub-step groups on equal or shrinking schedules. They
-  take no pacing parameter: the engine's outer loop owns pacing via
+  take no pacing parameter: the runner's outer loop owns pacing via
   `RunControl::before_slice()`.
   `LinearSubstepExecutor` requires `iterations` >= 1 (its constructor throws on
   0); `GeometricSubstepExecutor` requires a factor in (0, 1) and shrinks each

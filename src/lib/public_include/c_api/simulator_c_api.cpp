@@ -1,13 +1,12 @@
 #include "simulator_c_api.h"
 
-#include "simulator.hpp"
+#include "c_api/c_api_internal.hpp"
+
+#include "cpp_api/simulator.hpp"
 
 #include <cstdint>
-#include <exception>
 #include <memory>
-#include <new>
 #include <optional>
-#include <stdexcept>
 #include <string>
 
 // The C enums must stay numerically identical to the canonical C++ enums in
@@ -43,14 +42,8 @@ struct ssp4sim_simulator_handle
 
 namespace
 {
-    thread_local std::string g_last_error;
-
-    ssp4sim_status set_error(const ssp4sim_status status,
-                             const std::string &message)
-    {
-        g_last_error = message;
-        return status;
-    }
+    using ssp4sim::c_api::set_error;
+    using ssp4sim::c_api::translate_exceptions;
 
     ssp4sim::Simulator *simulator_of(ssp4sim_simulator_handle *handle)
     {
@@ -65,41 +58,6 @@ namespace
             return at_sim_time_ns;
         }
         return std::nullopt;
-    }
-
-    // The single translation from C++ error types to C status codes.
-    template <typename Fn>
-    ssp4sim_status translate_exceptions(const char *action, Fn &&fn)
-    {
-        try
-        {
-            fn();
-            g_last_error.clear();
-            return SSP4SIM_STATUS_OK;
-        }
-        catch (const std::invalid_argument &ex)
-        {
-            return set_error(SSP4SIM_STATUS_INVALID_ARGUMENT, ex.what());
-        }
-        catch (const std::logic_error &ex)
-        {
-            return set_error(SSP4SIM_STATUS_RUNTIME_ERROR, ex.what());
-        }
-        catch (const std::bad_alloc &)
-        {
-            return set_error(SSP4SIM_STATUS_OUT_OF_MEMORY,
-                             "failed to allocate memory");
-        }
-        catch (const std::exception &ex)
-        {
-            return set_error(SSP4SIM_STATUS_RUNTIME_ERROR, ex.what());
-        }
-        catch (...)
-        {
-            return set_error(
-                SSP4SIM_STATUS_RUNTIME_ERROR,
-                std::string("Unknown error while ") + action);
-        }
     }
 
     template <typename Fn>
@@ -283,9 +241,4 @@ void ssp4sim_simulator_destroy(ssp4sim_simulator_handle *handle)
     }
     delete handle->simulator;
     delete handle;
-}
-
-const char *ssp4sim_last_error(void)
-{
-    return g_last_error.c_str();
 }

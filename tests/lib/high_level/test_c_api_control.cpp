@@ -1,8 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include "simulator_c_api.h"
+#include "c_api/simulator_c_api.h"
 
-#include "simulator.hpp"
+#include "cpp_api/simulator.hpp"
 
 #include "reference_ssp_fixture.hpp"
 

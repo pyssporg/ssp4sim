@@ -10,6 +10,7 @@ include(cmake/AddUnitTargets.cmake)
 set(SSP4SIM_INTEGRATION_TESTS
   ${CMAKE_CURRENT_SOURCE_DIR}/high_level/test_smoke_simulator.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/high_level/test_c_api_control.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/high_level/test_stepper_c_api.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/core/test_data_recorder.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/core/test_fmi4c_adapter.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/core/test_sqlite_recorder.cpp

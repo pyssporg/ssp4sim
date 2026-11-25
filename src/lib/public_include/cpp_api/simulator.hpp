@@ -17,11 +17,12 @@ namespace ssp4sim
      * @brief A high-level simulator class that simplifies the process of running
      * a simulation.
      *
-     * This class is the public lifecycle facade. It owns the internal run
-     * thread and a SimulationEngine. Setup, queries and control are forwarded
-     * to the engine; the run body itself executes in SimulationEngine::run()
-     * on the run thread. info() is the sole public readback of run state,
-     * simulation time and speed.
+     * This class is the public compatibility facade over ThreadedRunner.
+     * ThreadedRunner owns the run thread, command queue, pacing, RunState and
+     * terminal result; it drives the synchronous SimulationStepper, which owns
+     * setup, the graph, executors, recorder and one macro step. Setup, queries
+     * and control are forwarded unchanged. info() is the sole public readback
+     * of run state, simulation time and speed.
      */
 
 

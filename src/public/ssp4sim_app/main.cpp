@@ -1,6 +1,6 @@
 #include "ssp4cpp/utils/log.hpp"
 
-#include "simulator.hpp"
+#include "cpp_api/simulator.hpp"
 
 #include <iostream>
 #include <string>
