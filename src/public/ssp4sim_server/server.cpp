@@ -402,11 +402,13 @@ namespace ssp4simd
                         else
                         {
                             response = daemon_.handle(parsed.request);
+                            const auto &command =
+                                parsed.request["cmd"]
+                                    .get_ref<const std::string &>();
                             if (response.value("ok", false) &&
-                                parsed.request["cmd"].get<std::string>() ==
-                                    "shutdown")
+                                command == "shutdown")
                             {
-                                request_shutdown();
+                                shutdown_requested_ = true;
                             }
                         }
 
@@ -535,11 +537,6 @@ namespace ssp4simd
         }
     }
 
-    void Server::request_shutdown()
-    {
-        shutdown_requested_ = true;
-    }
-
     void Server::shutdown()
     {
         if (shutdown_complete_)
@@ -547,22 +544,15 @@ namespace ssp4simd
             return;
         }
         shutdown_complete_ = true;
-        request_shutdown();
 
         // Stop and wait, then flush the terminal event before closing clients.
         daemon_.shutdown();
-        daemon_.monitor_tick();
         broadcast_pending_events();
 
         if (listen_fd_ >= 0)
         {
             ::close(listen_fd_);
             listen_fd_ = -1;
-        }
-
-        for (auto &client : clients_)
-        {
-            client->closing = true;
         }
 
         const auto deadline = std::chrono::steady_clock::now() +
@@ -621,11 +611,7 @@ namespace ssp4simd
             }
         }
 
-        for (auto &client : clients_)
-        {
-            client->dead = true;
-        }
-        reap_clients();
+        clients_.clear();
 
         if (!socket_path_.empty())
         {

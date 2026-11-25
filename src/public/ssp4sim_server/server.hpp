@@ -39,7 +39,6 @@ namespace ssp4simd
 
         void broadcast(const json &event);
         void broadcast_pending_events();
-        void request_shutdown();
 
         /// Close clients, drain their output, then unlink the socket.
         void shutdown();

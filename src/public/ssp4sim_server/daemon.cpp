@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cmath>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <utility>
 
@@ -112,11 +113,11 @@ namespace ssp4simd
     Daemon::Daemon(std::string config_path)
         : config_path_(std::move(config_path))
     {
-        sim_ = std::make_unique<ssp4sim::Simulator>(config_path_);
-        sim_->init();
-        const auto info = sim_->info();
+        runner_ = std::make_unique<ssp4sim::ThreadedRunner>(
+            ssp4sim::SharedConfig::from_file(config_path_));
+        runner_->init();
+        const auto info = runner_->info();
         reset_monitor_baseline(info);
-        emit(state_event(info));
     }
 
     Daemon::~Daemon()
@@ -126,17 +127,23 @@ namespace ssp4simd
 
     void Daemon::shutdown()
     {
+        stop_and_emit_terminal();
+    }
+
+    void Daemon::stop_and_emit_terminal()
+    {
         stop_and_wait();
+        monitor_tick();
     }
 
     void Daemon::stop_and_wait()
     {
-        if (!sim_)
+        if (!runner_)
         {
             return;
         }
 
-        const auto info = sim_->info();
+        const auto info = runner_->info();
 
         // Pre-run: there is no run thread to stop or join.
         if (info.state == ssp4sim::RunState::Created ||
@@ -145,32 +152,15 @@ namespace ssp4simd
             return;
         }
 
-        // Request stop for every non-terminal state. stop() is idempotent once
-        // Stopping or terminal, so it also covers a just-started run.
-        if (!ssp4sim::is_terminal(info.state))
-        {
-            try
-            {
-                sim_->stop();
-            }
-            catch (const std::exception &)
-            {
-                // The run may have reached a terminal state between the check
-                // and the call; wait() below still joins it.
-            }
-        }
+        runner_->request_stop();
 
-        if (run_started_)
+        try
         {
-            try
-            {
-                sim_->wait();
-            }
-            catch (const std::exception &)
-            {
-                // A failed run rethrows from wait(); reset/shutdown discard it.
-            }
-            run_started_ = false;
+            runner_->wait();
+        }
+        catch (...)
+        {
+            // A failed run rethrows from wait(); reset/shutdown discard it.
         }
     }
 
@@ -187,8 +177,7 @@ namespace ssp4simd
             }
             if (command == "start")
             {
-                sim_->start();
-                run_started_ = true;
+                runner_->start();
                 return make_ok(id);
             }
             if (command == "pause")
@@ -199,12 +188,12 @@ namespace ssp4simd
                 {
                     return make_error(id, "bad_value", at_error);
                 }
-                sim_->pause(at_ns);
+                runner_->pause(at_ns);
                 return make_ok(id);
             }
             if (command == "resume")
             {
-                sim_->resume();
+                runner_->resume();
                 return make_ok(id);
             }
             if (command == "stop")
@@ -215,7 +204,7 @@ namespace ssp4simd
                 {
                     return make_error(id, "bad_value", at_error);
                 }
-                sim_->stop(at_ns);
+                runner_->stop(at_ns);
                 return make_ok(id);
             }
             if (command == "set_speed")
@@ -237,7 +226,7 @@ namespace ssp4simd
                 {
                     return make_error(id, "bad_value", at_error);
                 }
-                sim_->set_speed(speed, at_ns);
+                runner_->set_speed(speed, at_ns);
                 return make_ok(id);
             }
             if (command == "reset")
@@ -266,7 +255,7 @@ namespace ssp4simd
 
     json Daemon::do_state(const json &id)
     {
-        const auto info = sim_->info();
+        const auto info = runner_->info();
         json response = make_ok(id);
         response["state"] = state_to_string(info.state);
         response["sim_time"] = ns_to_seconds(info.sim_time_ns);
@@ -276,12 +265,13 @@ namespace ssp4simd
 
     json Daemon::do_reset(const json &id)
     {
-        stop_and_wait();
+        stop_and_emit_terminal();
 
-        std::unique_ptr<ssp4sim::Simulator> fresh;
+        std::unique_ptr<ssp4sim::ThreadedRunner> fresh;
         try
         {
-            fresh = std::make_unique<ssp4sim::Simulator>(config_path_);
+            fresh = std::make_unique<ssp4sim::ThreadedRunner>(
+                ssp4sim::SharedConfig::from_file(config_path_));
             fresh->init();
         }
         catch (const std::exception &error)
@@ -289,17 +279,16 @@ namespace ssp4simd
             return make_error(id, "reset_failed", error.what());
         }
 
-        sim_ = std::move(fresh);
-        run_started_ = false;
-        const auto info = sim_->info();
+        runner_ = std::move(fresh);
+        const auto info = runner_->info();
         reset_monitor_baseline(info);
         emit(state_event(info));
         return make_ok(id);
     }
 
-    void Daemon::emit(const json &event)
+    void Daemon::emit(json event)
     {
-        events_.push_back(event);
+        events_.push_back(std::move(event));
     }
 
     std::vector<json> Daemon::collect_events()
@@ -312,14 +301,13 @@ namespace ssp4simd
     void Daemon::reset_monitor_baseline(const ssp4sim::RunInfo &info)
     {
         observed_state_ = info.state;
-        terminal_reported_ = false;
         last_time_emit_ = std::chrono::steady_clock::now();
         last_time_sim_ns_ = info.sim_time_ns;
     }
 
     void Daemon::monitor_tick()
     {
-        if (!sim_)
+        if (!runner_)
         {
             return;
         }
@@ -327,15 +315,43 @@ namespace ssp4simd
         using clock = std::chrono::steady_clock;
 
         const auto now = clock::now();
-        const auto info = sim_->info();
+        const auto info = runner_->info();
         const auto state = info.state;
+        const bool state_changed = state != observed_state_;
 
-        if (state != observed_state_)
+        if (state_changed)
         {
             observed_state_ = state;
             emit(state_event(info));
             last_time_emit_ = now;
             last_time_sim_ns_ = info.sim_time_ns;
+
+            if (ssp4sim::is_terminal(state))
+            {
+                std::string message;
+                try
+                {
+                    runner_->wait();
+                }
+                catch (const std::exception &error)
+                {
+                    message = error.what();
+                }
+                catch (...)
+                {
+                    message = "simulation failed with an unknown error";
+                }
+
+                if (state == ssp4sim::RunState::Failed)
+                {
+                    emit(error_event("simulation_failed",
+                                     message.empty() ? "simulation failed"
+                                                     : message));
+                }
+
+                emit(done_event(ssp4sim::terminal_result(state),
+                                info.sim_time_ns));
+            }
         }
         else if (state == ssp4sim::RunState::Running ||
                  state == ssp4sim::RunState::Paused)
@@ -347,48 +363,6 @@ namespace ssp4simd
                 last_time_emit_ = now;
                 last_time_sim_ns_ = info.sim_time_ns;
             }
-        }
-
-        if (ssp4sim::is_terminal(state) && !terminal_reported_)
-        {
-            terminal_reported_ = true;
-
-            ssp4sim::RunResult result = ssp4sim::RunResult::Failed;
-            if (state == ssp4sim::RunState::Failed)
-            {
-                std::string message = "simulation failed";
-                try
-                {
-                    sim_->wait();
-                }
-                catch (const std::exception &error)
-                {
-                    message = error.what();
-                }
-                catch (...)
-                {
-                    message = "simulation failed with an unknown error";
-                }
-                emit(error_event("simulation_failed", message));
-            }
-            else
-            {
-                try
-                {
-                    result = sim_->wait();
-                }
-                catch (const std::exception &)
-                {
-                    result = ssp4sim::RunResult::Failed;
-                }
-                catch (...)
-                {
-                    result = ssp4sim::RunResult::Failed;
-                }
-            }
-
-            run_started_ = false;
-            emit(done_event(result, info.sim_time_ns));
         }
     }
 }

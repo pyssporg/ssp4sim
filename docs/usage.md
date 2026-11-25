@@ -284,8 +284,9 @@ if (ssp4sim_stepper_create("./config.json", &stepper) == SSP4SIM_STATUS_OK) {
 
 ## Control Daemon
 
-`ssp4simd` is a local frontend that drives the same `Simulator` over a Unix
-domain socket. It is built by default; see
+`ssp4simd` is a local frontend that drives the simulation runtime
+(`ThreadedRunner`) directly over a Unix domain socket; external clients use the
+`Simulator` facade. It is built by default; see
 [Build From Source](build_from_source.md#control-daemon).
 
 ```bash
@@ -341,10 +342,11 @@ failure. Typical error codes include `bad_json`, `bad_version`, `bad_request`,
 disconnected. `state`, `done`, and `error` events are not droppable.
 
 **`reset` and `shutdown`.** `reset` stops and waits for any live run, destroys
-the simulator, rebuilds it from the same config, initializes it, and resets
-control state (overrides once that deferred feature lands). There is one active
-simulation per daemon. `shutdown` stops and waits for a live run, closes
-clients, unlinks the socket, and exits.
+the runner, rebuilds it from the same config, initializes it, and resets
+control state (overrides once that deferred feature lands). Resetting a live
+run emits that run's terminal `state` and `done` before the fresh `initialized`
+state. There is one active simulation per daemon. `shutdown` stops and waits
+for a live run, closes clients, unlinks the socket, and exits.
 
 Minimal client (responses and events are read from one persistent connection):
 

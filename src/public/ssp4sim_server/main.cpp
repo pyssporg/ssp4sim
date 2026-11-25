@@ -111,9 +111,9 @@ int main(int argc, char *argv[])
     {
         ssp4simd::Daemon daemon(options.config_path);
 
-        // Installed after the Simulator (and quill's backend) so this handler
-        // wins for SIGINT/SIGTERM, and before the socket exists so a signal
-        // can always take the clean unlink path.
+        // Installed after the daemon (and its runner) so this handler wins for
+        // SIGINT/SIGTERM, and before the socket exists so a signal can always
+        // take the clean unlink path.
         install_signal_handlers();
 
         const int listen_fd =

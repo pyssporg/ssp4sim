@@ -44,6 +44,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The `ssp4simd` daemon now drives `ThreadedRunner` directly; `reset` reports
+  the old live run's terminal `state` and `done` before the fresh `initialized`
+  state, and `shutdown` finalizes its own terminal event.
 - Removed the separate public run getters — C++ `Simulator::state`, `Simulator::sim_time_ns`, `Simulator::speed`; C ABI `ssp4sim_simulator_get_state`, `ssp4sim_simulator_get_sim_time_ns`, `ssp4sim_simulator_get_speed`; and Python `state()`, `sim_time_ns()`, `speed()`. `info()` is now the sole public read-back: C++ returns `RunInfo`, the C ABI returns `ssp4sim_run_info` by value (a null handle returns the zero/default record and sets `ssp4sim_last_error()`), and Python returns a `{"state": <string>, "sim_time_ns": <int>, "speed": <float>}` dict. This is a breaking change.
 - Removed variable listing from every public surface — C++ `Simulator::list_variables`, the C ABI (`ssp4sim_simulator_list_variables`, `ssp4sim_simulator_free_variables`, `ssp4sim_variable_info`), Python, and the `ssp4simd` `list_variables` command. This is a breaking change.
 - Public API headers are grouped by surface: `cpp_api/simulator.hpp` (threaded

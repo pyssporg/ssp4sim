@@ -41,7 +41,11 @@ pytestmark = pytest.mark.skipif(
 
 
 def build_config(
-    workdir: Path, *, stop_time: float = 3.0, speed: float = 1.0
+    workdir: Path,
+    *,
+    stop_time: float = 3.0,
+    speed: float = 1.0,
+    timestep: float = 0.05,
 ) -> Path:
     workdir.mkdir(parents=True, exist_ok=True)
     config = {
@@ -50,7 +54,7 @@ def build_config(
             "ssd": "SystemStructure.ssd",
             "start_time": 0.0,
             "stop_time": stop_time,
-            "timestep": 0.05,
+            "timestep": timestep,
             "tolerance": 1e-4,
             "speed": speed,
             "working_dir": str(workdir),
@@ -92,8 +96,11 @@ class Daemon:
         *,
         stop_time: float = 3.0,
         speed: float = 1.0,
+        timestep: float = 0.05,
     ) -> None:
-        config_path = build_config(workdir, stop_time=stop_time, speed=speed)
+        config_path = build_config(
+            workdir, stop_time=stop_time, speed=speed, timestep=timestep
+        )
         self.workdir = workdir
         self.socket_path = socket_path
         self.process = subprocess.Popen(
@@ -289,6 +296,33 @@ def test_lifecycle_and_shutdown(daemon: Daemon) -> None:
     assert not socket_path.exists()
 
 
+def test_reset_while_running(daemon: Daemon) -> None:
+    assert daemon.response({"v": 1, "id": 18, "cmd": "start"})["ok"]
+
+    running = daemon.wait_event("state")
+    while running["state"] != "running":
+        running = daemon.wait_event("state")
+
+    reset = daemon.response({"v": 1, "id": 19, "cmd": "reset"}, timeout=10.0)
+    assert reset["ok"], reset
+
+    # The old live run reports its terminal events before the fresh state.
+    stopped = daemon.wait_event("state")
+    assert stopped["state"] == "stopped", stopped
+    done = daemon.wait_event("done")
+    assert done["result"] == "stopped", done
+    initialized = daemon.wait_event("state")
+    assert initialized["state"] == "initialized", initialized
+
+    # Reset stops and waits for the live run, then rebuilds the runner.
+    assert daemon.process.poll() is None
+    state = daemon.response({"v": 1, "id": 20, "cmd": "state"})
+    assert state["ok"], state
+    assert state["state"] == "initialized", state
+    assert state["sim_time"] == 0.0, state
+    assert state["speed"] == 1.0, state
+
+
 def test_sigterm_unlinks_socket(tmp_path: Path) -> None:
     if not FIXTURE.exists():
         pytest.skip(f"missing reference fixture: {FIXTURE}")
@@ -439,6 +473,47 @@ def test_stop_after_done_is_noop(tmp_path: Path) -> None:
             instance.shutdown()
 
 
+def test_failed_run_emits_error_then_done(tmp_path: Path) -> None:
+    if not FIXTURE.exists():
+        pytest.skip(f"missing reference fixture: {FIXTURE}")
+
+    with tempfile.TemporaryDirectory(prefix="ssp4simd-") as socket_dir:
+        socket_path = Path(socket_dir) / "s.sock"
+        instance = Daemon(
+            tmp_path / "failed",
+            socket_path,
+            stop_time=1.0,
+            speed=0.0,
+            timestep=0.0,
+        )
+        try:
+            assert instance.response({"v": 1, "id": 90, "cmd": "start"})["ok"]
+
+            events = list(instance.events)
+            instance.events.clear()
+            while True:
+                message = instance._read_message(15.0)
+                events.append(message)
+                if message.get("event") == "done":
+                    break
+
+            errors = [e for e in events if e.get("event") == "error"]
+            dones = [e for e in events if e.get("event") == "done"]
+            assert len(errors) == 1, events
+            assert errors[0]["code"] == "simulation_failed", errors[0]
+            assert len(dones) == 1, events
+            assert dones[0]["result"] == "failed", dones[0]
+            assert events.index(errors[0]) < events.index(dones[0])
+
+            state = instance.response({"v": 1, "id": 91, "cmd": "state"})
+            assert state["state"] == "failed", state
+            assert not [
+                e for e in instance.events if e.get("event") in {"error", "done"}
+            ]
+        finally:
+            instance.shutdown()
+
+
 def test_shutdown_immediately_after_start(tmp_path: Path) -> None:
     if not FIXTURE.exists():
         pytest.skip(f"missing reference fixture: {FIXTURE}")
@@ -452,8 +527,29 @@ def test_shutdown_immediately_after_start(tmp_path: Path) -> None:
             assert instance.response({"v": 1, "id": 80, "cmd": "start"})["ok"]
             assert instance.response({"v": 1, "id": 81, "cmd": "shutdown"})["ok"]
 
+            # Read the terminal sequence to EOF without skipping duplicates.
+            messages = list(instance.events)
+            instance.events.clear()
+            while True:
+                try:
+                    messages.append(instance._read_message(10.0))
+                except ConnectionError:
+                    break
+
             # A 60 s run must not delay shutdown once stop is requested.
             assert instance.process.wait(timeout=15) == 0
             assert not socket_path.exists()
+
+            done_events = [m for m in messages if m.get("event") == "done"]
+            assert len(done_events) == 1, done_events
+            assert done_events[0]["result"] == "stopped", done_events[0]
+
+            done_index = messages.index(done_events[0])
+            terminal_states = [
+                m
+                for m in messages[:done_index]
+                if m.get("event") == "state" and m.get("state") == "stopped"
+            ]
+            assert terminal_states, messages
         finally:
             instance.shutdown()

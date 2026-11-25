@@ -258,7 +258,8 @@ Runtime control is covered at four levels:
   `Simulator` control surface, including the blocking `start()`, the `wait()`
   result string, and the coherent `info()` read-back, and
   `tests/python/test_ssp4simd.py` runs a live `ssp4simd` process and speaks the
-  NDJSON protocol over its Unix-domain socket, including `reset` and `shutdown`.
+  NDJSON protocol over its Unix-domain socket, including `reset` (also while
+  running, with terminal-event ordering), `shutdown`, and a failed run.
 
 Variable overrides and override commands are planned/deferred and are not in
 current releases.
