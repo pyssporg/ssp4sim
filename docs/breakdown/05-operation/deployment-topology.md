@@ -17,7 +17,7 @@ The product ships as a Linux tarball plus a Python wheel and runs from a filesys
   - `include/ssp4sim/` — public headers (simulator.hpp, simulator_c_api.h, shared_config.hpp).
   - `python/pyssp4sim-*.whl` — Python wheel.
   - `resources/` — embrace.json under embrace/, generic_config.json.
-  - `readme.md`, `LICENSE`, `RELEASE.txt`.
+  - `README.md`, `LICENSE`, `RELEASE.txt`.
 - **Install paths:**
   - System-wide: extract tarball to `/opt/ssp4sim/` or `/usr/local/`.
   - User-local: extract to `~/.local/ssp4sim/`.

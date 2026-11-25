@@ -14,7 +14,7 @@ The release pipeline builds, packages, and publishes the Linux tarball and Pytho
 - **Artifacts** (same tag and SHA):
   - `ssp4sim-linux-x86_64-<version>.tar.gz` plus a `latest` alias.
   - `pyssp4sim-<version>-*.whl` plus a dev alias.
-  - Tarball contents: bin/, lib/, include/, python/, resources/, readme.md, LICENSE, RELEASE.txt.
+  - Tarball contents: bin/, lib/, include/, python/, resources/, README.md, LICENSE, RELEASE.txt.
 - **CI build and test:** the workflow runs on ubuntu-22.04, builds the Ubuntu 22.04 + GCC 13 container from `containers/ubuntu22-gcc13/Containerfile`, and runs configure, build, test, install, and packaging inside it with the same commands as the build-from-source and test docs.
 - **Staging:** CMake install rules copy build artifacts to a staging tree under `dist/`.
 - **Packaging:** creates tarball, wheel, aliases, and SHA256SUMS in `dist/`; RELEASE.txt records version, commit SHA, and UTC build timestamp.

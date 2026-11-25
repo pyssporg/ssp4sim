@@ -18,14 +18,10 @@ Tarball contents are installed from CMake into:
 - `lib/`
 - `include/`
 - `python/`
-- metadata files ([`LICENSE`](../LICENSE), `RELEASE.txt`)
+- metadata files ([`README.md`](../README.md), [`LICENSE`](../LICENSE), `RELEASE.txt`)
 
 The example configs and `resources/` are not part of the staging tree; they
 remain in a source checkout.
-
-Note: the top-level install rule in [`CMakeLists.txt`](../CMakeLists.txt) names
-`readme.md`, but the tracked file is `README.md`. Until that rule is corrected,
-`cmake --install` fails on a fresh checkout.
 
 ## Stage 2: CI build and test
 

@@ -35,7 +35,7 @@ from here.
 
 - After each task, update relevant documentation when behavior, commands,
   architecture, expected failures, or workflow assumptions changed. Prefer
-  `readme.md`, `tests/README.md`, or `docs/` depending on scope.
+  `README.md`, `tests/README.md`, or `docs/` depending on scope.
 - Avoid monkey patching or similar workarounds. Find and fix the root cause for
   errors whenever the repository context makes that practical.
 - Keep repository context narrow. Start with the files directly involved in the
