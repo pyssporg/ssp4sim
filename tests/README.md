@@ -155,10 +155,10 @@ directory that directly contains `SystemStructure.ssd` (e.g.
 Model-exchange fixtures are excluded because the current runtime only supports
 co-simulation FMUs.
 
-CI runs the `pyfmi_csv_source_sink` case in its own pytest process: the prebuilt
-`CsvSource` FMU corrupts the heap when a later Hopsan FMU is loaded in the same
-interpreter, which surfaces as a SIGSEGV in the next sweep model. Isolating the
-process keeps the rest of the sweep covered until the fixture is rebuilt.
+CI runs each reference model in its own pytest process: prebuilt FMUs from
+different vendors are not safe to load in one interpreter across models, and a
+later sweep model crashes in its `libstdc++` locale path after an earlier FMU
+has been loaded.
 
 Two fixtures are known hard failures in the sweep and are pinned as strict
 `xfail`s in `test_reference_sweep.py`:

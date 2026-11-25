@@ -56,14 +56,17 @@ jobs:
           venv/bin/pip install --upgrade pip
           venv/bin/pip install -r requirements.txt
 
-      # The prebuilt CsvSource FMU from the pyfmi_csv fixture leaves the
-      # interpreter unable to load a later Hopsan FMU in the same process
-      # (heap corruption surfaces as a SIGSEGV in the next model's libstdc++
-      # locale path). Run that one case in its own process so the rest of the
-      # reference sweep stays covered.
+      # Prebuilt FMUs from different vendors are not safe to load in one
+      # interpreter across models: the process crashes in a later model's
+      # libstdc++ locale path (SIGSEGV). Run every reference model in its own
+      # pytest process; the remaining Python tests share one process.
       - name: Run Python API tests
         run: |
           venv/bin/python -m pytest -q tests/python \
-            --deselect 'tests/python/high_level/test_reference_sweep.py::test_reference_ssp_fully_simulates[pyfmi_csv_source_sink/baseline/model]'
-          venv/bin/python -m pytest -q \
-            'tests/python/high_level/test_reference_sweep.py::test_reference_ssp_fully_simulates[pyfmi_csv_source_sink/baseline/model]'
+            --ignore=tests/python/high_level/test_reference_sweep.py
+          venv/bin/python -m pytest -q --collect-only \
+            tests/python/high_level/test_reference_sweep.py \
+            | grep -E '^tests/.*::' > sweep_ids.txt
+          while read -r test_id; do
+            venv/bin/python -m pytest -q "$test_id"
+          done < sweep_ids.txt
