@@ -171,6 +171,30 @@ Some test fixtures are stored as expanded FMU/SSP directories instead of `.fmu`/
 
 More test-suite detail is in [tests/README.md](../tests/README.md).
 
+## Control Daemon
+
+`ssp4simd` is built by default. The CMake option is
+`SSP4SIM_BUILD_SERVER` (`ON` by default); disable it for a smaller build:
+
+```bash
+cmake --preset=vcpkg -DSSP4SIM_BUILD_SERVER=OFF
+cmake --build build
+```
+
+The build output is
+`./build/src/public/ssp4sim_server/ssp4simd`. Run it with a config file and a
+Unix domain socket path (both required):
+
+```bash
+./build/src/public/ssp4sim_server/ssp4simd \
+  --config ./resources/embrace/embrace.json \
+  --socket /tmp/ssp4sim.sock
+```
+
+The CLI, NDJSON protocol, and client example are in
+[Control Daemon](usage.md#control-daemon). The daemon links the same
+`ssp4sim_lib` as `sim_app`; it adds no network listener.
+
 ## Build Python API (Editable Install)
 
 Use the same Python version for CMake and `pip`. The Python API requires a

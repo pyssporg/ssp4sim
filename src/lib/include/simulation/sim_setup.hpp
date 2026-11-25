@@ -37,6 +37,8 @@ namespace ssp4sim::pre
     /// Registers the model value storages with the recorder (if any), then builds
     /// the configured executor over the models. The executor wires the shared
     /// DataAccessResolver into every FmuModel (see ExecutorBuilder::build).
+    /// The returned executor is a pure time-step runner; the engine owns the
+    /// outer loop and control pacing.
     SimulationData setup_sim_behaviour(
         std::map<std::string, std::shared_ptr<graph::Invocable>> models,
         signal::DataRecorder *recorder,

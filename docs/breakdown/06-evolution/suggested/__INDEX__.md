@@ -15,7 +15,6 @@ summary: Improvement candidates not yet selected for development
 - **IMP-030** [Remote result ingestion via InfluxDB Line Protocol](IMP-030.md) — Add a remote result sink that emits simulation results over InfluxDB Line Protocol for multi-source ingestion
 - **IMP-031** [OpenTelemetry distributed observability](IMP-031.md) — Add OpenTelemetry tracing so cross-process simulations are observable as one correlated trace
 - **IMP-035** [XML signal list with per-sink behavior](IMP-035.md) — Let a standalone XML signal list select recorded signals and override per-sink behavior
-- **IMP-037** [Pause, play, stop and set-speed lifecycle controls for the public API](IMP-037.md) — Add interactive lifecycle control (pause/play/stop/set_speed) to the C++, C and Python public API
 - **IMP-043** [Unit test coverage for boundary connection resolution](IMP-043.md) — Add focused unit tests for resolve_model_key and resolve_connection, which currently have zero direct coverage
 - **IMP-045** [Investigate signal_sine_gain_add tree/graph output discrepancy](IMP-045.md) — Re-run signal_sine_gain_add and determine whether the tree_output/graph_output discrepancy is a real output-generation bug
 - **IMP-047** [Replace vendored reference SSPs with small in-repo e2e fixtures](IMP-047.md) — Drop the resources/reference_ssp submodule, add small in-repo fixtures, and outsource full e2e to ssp_references

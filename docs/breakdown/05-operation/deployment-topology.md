@@ -13,8 +13,9 @@ The product ships as a Linux tarball plus a Python wheel and runs from a filesys
 
 - **Release tarball layout** (`ssp4sim-linux-x86_64-<version>/`):
   - `bin/sim_app` — CLI binary.
+  - `bin/ssp4simd` — local control daemon.
   - `lib/libssp4sim.a` — static library.
-  - `include/ssp4sim/` — public headers (simulator.hpp, simulator_c_api.h, shared_config.hpp).
+  - `include/ssp4sim/` — public headers (simulator.hpp, simulator_c_api.h, runtime_control.hpp, shared_config.hpp).
   - `python/pyssp4sim-*.whl` — Python wheel.
   - `resources/` — embrace.json under embrace/, generic_config.json.
   - `README.md`, `LICENSE`, `RELEASE.txt`.
@@ -28,3 +29,4 @@ The product ships as a Linux tarball plus a Python wheel and runs from a filesys
   - Linux x86_64, Ubuntu 22.04 primary.
   - No environment variables required; all configuration via JSON file.
   - The `working_dir` config key anchors output locations.
+  - `ssp4simd` binds a Unix domain socket path supplied with `--socket` (mode 0600); it opens no listening network port (`INFO-010`).

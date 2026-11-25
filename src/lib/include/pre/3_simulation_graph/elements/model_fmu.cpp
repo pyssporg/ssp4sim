@@ -217,7 +217,6 @@ namespace ssp4sim::graph
         });
 
         pre(step_data.start_time, step_data.end_time);
-
         IF_LOG({
             LOG_DEBUG(log, "[{func}] Step until {end_time}", __func__, step_data.end_time);
         });

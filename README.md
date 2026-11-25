@@ -2,7 +2,7 @@
 <!-- Layer: 00-intent, 01-product, 05-operation, 03-implementation -->
 
 
-SSP4SIM is a C++23 simulation engine for SSP archives with local database result artifacts and CSV export. See [breakdown/00-intent/purpose.md](docs/breakdown/00-intent/purpose.md) for the full project purpose.
+SSP4SIM is a C++23 simulation engine for SSP archives with local database result artifacts, CSV export, runtime control (pause/resume/stop and speed), and a local control daemon (`ssp4simd`). Variable overrides are planned/deferred and not in current releases. See [breakdown/00-intent/purpose.md](docs/breakdown/00-intent/purpose.md) for the full project purpose.
 
 See [breakdown/01-product/capabilities.md](docs/breakdown/01-product/capabilities.md) for the full capabilities list.
 
@@ -58,6 +58,15 @@ sim.init()
 sim.simulate()
 ```
 
+`Simulator` also exposes `start()`, `pause()`, `resume()`, `stop()`,
+`set_speed()`, `info()`, and `wait()`; `start()` blocks until the run
+is running or terminal, and `simulate()` remains `start()` followed by `wait()`.
+`info()` is the sole read-back and returns one coherent
+`state`/`sim_time_ns`/`speed` reading. Variable
+overrides are planned/deferred and not in current releases.
+The same control is available through the C API and the `ssp4simd` daemon
+(see [Usage](docs/usage.md#runtime-control)).
+
 ## Tests And Lint
 
 ```bash
@@ -78,7 +87,7 @@ For structured per-layer documentation, see the [breakdown](docs/breakdown/) dir
 - [Documentation](docs/README.md): installation, usage, configuration, and development guides.
 - [Installation](docs/installation.md): release tarball and wheel consumption.
 - [Build from source](docs/build_from_source.md): local and container builds.
-- [Usage](docs/usage.md): CLI, Python API, examples, and result artifacts.
+- [Usage](docs/usage.md): CLI, Python API, runtime control, the control daemon, examples, and result artifacts.
 - [Configuration](docs/configuration.md): JSON keys, defaults, and supported values.
 - [Testing](tests/README.md): C++ and Python test layout and commands.
 - [Development](docs/development.md): contributor workflow and repository conventions.

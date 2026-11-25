@@ -34,4 +34,5 @@ summary: User-visible scenarios the product must support, one per leaf
 - **UC-023** [UC-023: Run a Connected System Without Manual Ordering Configuration](UC-023.md) — A developer runs a multi-model SSP with interconnections and loops without specifying execution order or wiring manually
 - **UC-024** [UC-024: Capture FMU-internal Log Output During a Run](UC-024.md) — A developer enables FMU-level logging so messages emitted by the FMU implementation are forwarded into the configured log sinks
 - **UC-025** [UC-025: Run Concurrent Simulations for Parameter Sweeps](UC-025.md) — A user runs multiple simulations concurrently as separate processes with per-run result artifacts that do not collide
+- **UC-026** [UC-026: Control a Running Simulation from an External Process](UC-026.md) — An operator or script controls a running simulation over a local socket without embedding the engine
 <!-- pb:index:end -->

@@ -17,14 +17,12 @@
 namespace ssp4sim::utils
 {
 
-    nlohmann::json Config::data_{};
-
     namespace
     {
         // Resolve "a.b.c" into a json node pointer (or nullptr if missing).
-        nlohmann::json *resolvePathNode(nlohmann::json &data, const std::string &dottedKey)
+        const nlohmann::json *resolvePathNode(const nlohmann::json &data, const std::string &dottedKey)
         {
-            nlohmann::json *cur = &data;
+            const nlohmann::json *cur = &data;
             if (dottedKey.empty())
             {
                 return cur;
@@ -79,11 +77,9 @@ namespace ssp4sim::utils
         }
 
         template <typename T>
-        T get_value(const std::string &dottedKey)
+        T get_value(const nlohmann::json &data, const std::string &dottedKey)
         {
-            Config::data_available();
-
-            const nlohmann::json *node = resolvePathNode(Config::data_, dottedKey);
+            const nlohmann::json *node = resolvePathNode(data, dottedKey);
             if (!node || node->is_null())
             {
                 throw missing_key_error("Config: missing key: " + dottedKey);
@@ -101,46 +97,40 @@ namespace ssp4sim::utils
         }
     }
 
-    nlohmann::json *Config::resolvePath(const std::string &dottedKey)
+    Config::Config(nlohmann::json data) : data_(std::move(data))
     {
-        data_available();
-        return resolvePathNode(data_, dottedKey);
     }
 
-    void Config::loadFromFile(const std::string &path)
+    Config Config::fromFile(const std::filesystem::path &path)
     {
         std::ifstream in(path);
         if (!in)
         {
-            throw std::runtime_error("Config: cannot open file: " + path);
+            throw std::runtime_error("Config: cannot open file: " + path.string());
         }
 
         std::ostringstream buf;
         buf << in.rdbuf();
-        loadFromString(buf.str());
+        return fromString(buf.str());
     }
 
-    void Config::loadFromString(const std::string &config)
+    Config Config::fromString(std::string_view config)
     {
-        nlohmann::json parsed = nlohmann::json::parse(config,
+        nlohmann::json parsed = nlohmann::json::parse(config.begin(), config.end(),
                                                       /* callback */ nullptr,
                                                       /* allow exceptions */ true,
                                                       /* ignore_comments */ true);
 
-        data_ = std::move(parsed);
+        return Config(std::move(parsed));
     }
 
-    void Config::data_available()
+    const nlohmann::json *Config::resolvePath(const std::string &dottedKey) const
     {
-        if (data_.is_null())
-        {
-            throw std::runtime_error("Config: data is not loaded");
-        }
+        return resolvePathNode(data_, dottedKey);
     }
 
-    std::string Config::as_string()
+    std::string Config::as_string() const
     {
-        data_available();
         return data_.dump();
     }
 
@@ -149,39 +139,27 @@ namespace ssp4sim::utils
         return std::regex_replace(text, std::regex("\\[TIME\\]"), time::time_now_str());
     }
 
-    std::string Config::getString(const std::string &dottedKey)
+    std::string Config::getString(const std::string &dottedKey) const
     {
-        return get_value<std::string>(dottedKey);
+        return get_value<std::string>(data_, dottedKey);
     }
 
-    double Config::getDouble(const std::string &dottedKey)
+    double Config::getDouble(const std::string &dottedKey) const
     {
-        return get_value<double>(dottedKey);
+        return get_value<double>(data_, dottedKey);
     }
 
-    int Config::getInt(const std::string &dottedKey)
+    int Config::getInt(const std::string &dottedKey) const
     {
-        return get_value<int>(dottedKey);
+        return get_value<int>(data_, dottedKey);
     }
 
-    bool Config::getBool(const std::string &dottedKey)
+    bool Config::getBool(const std::string &dottedKey) const
     {
-        return get_value<bool>(dottedKey);
+        return get_value<bool>(data_, dottedKey);
     }
 
-    std::string Config::getOr(const std::string &dottedKey, std::string_view defaultValue)
-    {
-        try
-        {
-            return getString(dottedKey);
-        }
-        catch (const missing_key_error &)
-        {
-            return substitute_tags(std::string(defaultValue));
-        }
-    }
-
-    std::string Config::getOr(const std::string &dottedKey, const char *defaultValue)
+    std::string Config::getOr(const std::string &dottedKey, std::string_view defaultValue) const
     {
         try
         {
@@ -193,7 +171,19 @@ namespace ssp4sim::utils
         }
     }
 
-    double Config::getOr(const std::string &dottedKey, double defaultValue)
+    std::string Config::getOr(const std::string &dottedKey, const char *defaultValue) const
+    {
+        try
+        {
+            return getString(dottedKey);
+        }
+        catch (const missing_key_error &)
+        {
+            return substitute_tags(std::string(defaultValue));
+        }
+    }
+
+    double Config::getOr(const std::string &dottedKey, double defaultValue) const
     {
         try
         {
@@ -205,7 +195,7 @@ namespace ssp4sim::utils
         }
     }
 
-    int Config::getOr(const std::string &dottedKey, int defaultValue)
+    int Config::getOr(const std::string &dottedKey, int defaultValue) const
     {
         try
         {
@@ -217,7 +207,7 @@ namespace ssp4sim::utils
         }
     }
 
-    bool Config::getOr(const std::string &dottedKey, bool defaultValue)
+    bool Config::getOr(const std::string &dottedKey, bool defaultValue) const
     {
         try
         {

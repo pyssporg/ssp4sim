@@ -10,7 +10,6 @@
 #include "executor/seidel/seidel_serial.hpp"
 #include "executor/seidel/seidel_parallel.hpp"
 #include "executor/loop_aware/la2_builder.hpp"
-#include "executor/substep/macro_substep_executor.hpp"
 
 #include "resolver/data_access_resolver.hpp"
 
@@ -23,11 +22,9 @@
 namespace ssp4sim::graph
 {
 
-    ExecutorBuilder::ExecutorBuilder(const ssp4sim::ExecutorOptions &options,
-                                     uint64_t macro_step)
+    ExecutorBuilder::ExecutorBuilder(const ssp4sim::ExecutorOptions &options)
         : log(ssp4cpp::utils::log::make_logger("ssp4sim.execution.ExecutorBuilder")),
-          options_(options),
-          macro_step_(macro_step)
+          options_(options)
     {
         // Every concrete executor registers as one leaf variant: a `selects`
         // predicate over the typed options and a uniform `(nodes) -> executor`
@@ -129,9 +126,9 @@ namespace ssp4sim::graph
     std::shared_ptr<ExecutorBase> ExecutorBuilder::build(std::vector<std::shared_ptr<Invocable>> nodes)
     {
         // Uniform dispatch: the config set decides which registered variant
-        // applies; resolve it (exactly one must match), build the specialized
-        // executor (la2's factory assembles the whole nested stack), then wrap
-        // in a MacroExecutor sized from the configured timestep.
+        // applies; resolve it (exactly one must match) and build the
+        // specialized executor (la2's factory assembles the whole nested
+        // stack). The engine owns the outer time-step loop.
 
         std::vector<const Variant *> matches;
         matches.reserve(variants_.size());
@@ -161,13 +158,7 @@ namespace ssp4sim::graph
                                      options_.method + "' matches variants: " + names);
         }
 
-        auto specialized_executor = matches[0]->factory(std::move(nodes));
-
-        // Always wrap in a MacroExecutor; `realtime` records whether the outer
-        // macro steps are paced to the wall clock.
-        return std::make_shared<graph::MacroExecutor>(
-            std::vector<std::shared_ptr<Invocable>>{specialized_executor},
-            macro_step_, options_.realtime);
+        return matches[0]->factory(std::move(nodes));
     }
 
 }

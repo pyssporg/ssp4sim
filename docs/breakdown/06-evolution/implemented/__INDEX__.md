@@ -34,6 +34,7 @@ summary: Closed improvements — a lookup of what was done, never a backlog
 - **IMP-032** [Per-simulation SQLite database files for concurrent write parallelism](IMP-032.md) — Give each simulation run its own SQLite file so concurrent simulations do not serialize on the write lock
 - **IMP-033** [Refactoring and cleanup of graph builder files](IMP-033.md) — Clean up analysis_graph_builder and graph_builder: dead code, shadowing, monolithic build methods, and consistency
 - **IMP-034** [Strip the DuckDB result feature](IMP-034.md) — Remove all DuckDB recording infrastructure with no migration path; the feature was experimental
+- **IMP-037** [Runtime control on the public API and the local control daemon](IMP-037.md) — Add background lifecycle control, speed, and a local NDJSON daemon across the C++, C, and Python surfaces; variable overrides deferred
 - **IMP-038** [Clarify analysis graph vs simulation graph responsibilities](IMP-038.md) — Remove model-to-model edges from the analysis graph; derive them in the sim graph; add recursive connection flattening
 - **IMP-039** [Evolve the analysis graph into an AnalysisSystem with nested-SSP support](IMP-039.md) — Replace the flat AnalysisGraph with a hierarchical AnalysisSystem whose objects are plain data, enabling nested SSPs
 - **IMP-040** [Three-layer architecture — Analysis System, Analysis Graph, Simulation Graph](IMP-040.md) — Complete the three-layer split with an explicit AnalysisGraph factory and eager-loading contract

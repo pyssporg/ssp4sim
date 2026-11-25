@@ -9,7 +9,9 @@
 #include <filesystem>
 #include <fstream>
 #include <algorithm>
+#include <chrono>
 #include <string>
+#include <thread>
 
 namespace
 {
@@ -53,7 +55,6 @@ namespace
         config["simulation"]["stop_time"] = 1.0;
         config["simulation"]["timestep"] = 0.1;
         config["simulation"]["tolerance"] = 1e-4;
-        config["simulation"]["realtime"] = false;
         config["simulation"]["working_dir"] = workdir.string();
 
         config["simulation"]["recording"]["enable"] = true;
@@ -95,7 +96,6 @@ namespace
         config["simulation"]["stop_time"] = 1.0;
         config["simulation"]["timestep"] = 0.1;
         config["simulation"]["tolerance"] = 1e-4;
-        config["simulation"]["realtime"] = false;
         config["simulation"]["working_dir"] = workdir.string();
 
         config["simulation"]["log"]["level_terminal"] = "error";
@@ -163,4 +163,87 @@ TEST_CASE("Simulator smoke test: .ssp with embedded .fmu archive loads and simul
     simulator.simulate();
 
     REQUIRE(fs::exists(workdir / "result.csv"));
+}
+
+// ---------------------------------------------------------------------------
+// Description: Two SharedConfig values parsed from different JSON documents
+//              keep their own values (no process-global config state).
+// Rationale:   Object-first construction is only safe if configs are values.
+// ---------------------------------------------------------------------------
+TEST_CASE("SharedConfig instances are independent", "[high_level][smoke][config]")
+{
+    const auto a = ssp4sim::SharedConfig::from_string(R"json({
+        "simulation": {
+            "ssp": "./fake.ssp",
+            "working_dir": "./wd/a",
+            "start_time": 0.0,
+            "stop_time": 1.0,
+            "timestep": 0.1,
+            "tolerance": 1e-6,
+            "speed": 1.5,
+            "recording": { "csv": { "enable": false } }
+        }
+    })json");
+
+    const auto b = ssp4sim::SharedConfig::from_string(R"json({
+        "simulation": {
+            "ssp": "./fake.ssp",
+            "working_dir": "./wd/b",
+            "start_time": 0.0,
+            "stop_time": 1.0,
+            "timestep": 0.1,
+            "tolerance": 1e-6,
+            "speed": 0.5,
+            "recording": { "csv": { "enable": false } }
+        }
+    })json");
+
+    REQUIRE(a.speed == 1.5);
+    REQUIRE(b.speed == 0.5);
+    REQUIRE(a.working_dir == fs::path("./wd/a"));
+    REQUIRE(b.working_dir == fs::path("./wd/b"));
+}
+
+// ---------------------------------------------------------------------------
+// Description: The engine can be built object-first from a SharedConfig loaded
+//              from an existing smoke config file.
+// Rationale:   Simulator(SharedConfig) must be equivalent to Simulator(path).
+// ---------------------------------------------------------------------------
+TEST_CASE("Simulator constructs from a SharedConfig (object-first)", "[high_level][smoke]")
+{
+    const auto workdir = ssp4sim::tests::reference_ssp::project_root() /
+                         "build" / "test_cpp_high_level" / "object_first";
+    const auto config_path = write_smoke_config(workdir);
+    fs::remove(workdir / "result.csv");
+
+    auto config = ssp4sim::SharedConfig::from_file(config_path);
+    ssp4sim::Simulator simulator(config);
+    simulator.init();
+    simulator.simulate();
+
+    REQUIRE(fs::exists(workdir / "result.csv"));
+}
+
+// ---------------------------------------------------------------------------
+// Description: Destroying a Simulator while its run thread is live must stop
+//              and join the run before conf/ssp are released (no UAF).
+// Rationale:   Regression for the SimulatorPrivate destruction-order bug.
+// ---------------------------------------------------------------------------
+TEST_CASE("Simulator destruction while running joins cleanly", "[high_level][smoke]")
+{
+    const auto workdir = ssp4sim::tests::reference_ssp::project_root() /
+                         "build" / "test_cpp_high_level" / "destructor_running";
+    const auto config_path = write_smoke_config(workdir);
+
+    auto config = ssp4sim::SharedConfig::from_file(config_path);
+    // Pace the run so it is still live when the Simulator is destroyed.
+    config.speed = 1.0;
+
+    {
+        ssp4sim::Simulator simulator(config);
+        simulator.init();
+        simulator.start();
+        // start() returns only after RunControl leaves Initialized, so the
+        // destructor below exercises the immediate teardown path.
+    } // destructor must request stop, wait and join without throwing
 }

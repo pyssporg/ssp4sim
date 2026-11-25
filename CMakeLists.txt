@@ -10,6 +10,7 @@ include(GNUInstallDirs)
 # OPTIONS
 option(SSP4SIM_BUILD_TEST "Build test executable" ON)
 option(SSP4SIM_BUILD_PYTHON_API "Build Python API" ON)
+option(SSP4SIM_BUILD_SERVER "Build the ssp4simd control daemon" ON)
 option(SSP4SIM_LOG_HOT_PATH "Include logging in hot path" OFF)
 option(SSP4SIM_HOT_PATH_CHECKS "Perform validation checks in get_derivative hot path" ON)
 
@@ -71,6 +72,9 @@ add_subdirectory(src/lib)
 
 # Public artifacts
 add_subdirectory(src/public/ssp4sim_app)
+if(SSP4SIM_BUILD_SERVER)
+  add_subdirectory(src/public/ssp4sim_server)
+endif()
 if(SSP4SIM_BUILD_PYTHON_API)
   add_subdirectory(src/public/python_api)
 endif()

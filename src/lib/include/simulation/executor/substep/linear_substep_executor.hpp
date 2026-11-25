@@ -22,17 +22,13 @@ namespace ssp4sim::graph
     /// so each sub-step samples the previous sub-step's commitments
     /// (deterministic Jacobi-style relaxation).
     ///
-    /// `realtime` (default false) paces every emitted sub-step to the wall
-    /// clock via ExecutorBase::wait_for_realtime_sync.
-    ///
     /// Resolver-neutral: this executor never installs a read-path resolver.
     /// The executor stack owner installs THE resolver for the whole stack.
     class LinearSubstepExecutor final : public ExecutorBase
     {
     public:
         LinearSubstepExecutor(std::vector<std::shared_ptr<Invocable>> nodes,
-                              std::size_t iterations = 0,
-                              const bool realtime = false);
+                              std::size_t iterations = 0);
 
 
         std::string to_string() const override;

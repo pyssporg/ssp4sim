@@ -12,6 +12,21 @@ This page collects contributor conventions. Build commands live in
 For the complete repository structure, see the [code structure overview](breakdown/03-implementation/code-structure.md).
 For detailed architecture information, see the [architecture layer](breakdown/02-architecture/).
 
+## Control Modules
+
+Runtime control is split between the engine and a separate frontend:
+
+- `src/lib/include/simulation/control/`: `RunControl` (state machine and run
+  thread), command queue, and run state.
+- `src/lib/public_include/runtime_control.hpp`: public state/result enums,
+  shared by the C++, C, and Python surfaces.
+- `src/public/ssp4sim_server/`: the `ssp4simd` frontend (`daemon`, Unix-domain
+  socket `server`, NDJSON framing and `protocol`). It links the engine and adds
+  no listening network port to the engine.
+- `tests/lib/control/`: unit tests for the control state machine.
+
+Variable overrides are planned/deferred and are not in current releases.
+
 ## Core Development Loop
 
 1. Build with the smallest relevant source-build workflow.
@@ -57,7 +72,8 @@ therefore blocks only the tests whose cones reach it.
 - CMake presets (`CMakePresets.json`) expect vcpkg; see
   [vcpkg.md](../vcpkg.md) for setup.
 - Common optional build flags: `SSP4SIM_BUILD_TEST`,
-  `SSP4SIM_BUILD_PYTHON_API`, and `SSP4SIM_LOG_HOT_PATH`.
+  `SSP4SIM_BUILD_PYTHON_API`, `SSP4SIM_BUILD_SERVER`, and
+  `SSP4SIM_LOG_HOT_PATH`.
 - Use the repo-local `venv` for Python commands when it exists. Prefer
   `. venv/bin/activate && <command>` or `venv/bin/python <command>` over the
   system Python for workflow scripts and pytest.
@@ -71,24 +87,25 @@ defaults for keys read from `utils::Config`.
 ## Executor Stacks And The Single-Resolver Rule
 
 Executors nest: `ExecutorBase` is an `Invocable` whose children may themselves be
-executors (e.g. `MacroExecutor -> SerialSeidel ->
-LinearSubstepExecutor -> FmuModel`). When composing a stack:
+executors (e.g. `SerialSeidel -> LinearSubstepExecutor -> FmuModel`). The
+engine owns the outer macro-step loop. When composing a stack:
 
 - **Configuration is parsed once, centrally; options are nested.** The
-  `SharedConfig` constructor and `ssp4sim::ExecutorOptions::load()`
-  (`src/lib/public_include/shared_config.hpp`) are the only places that read the
-  global `utils::Config`. Option structs are *nested* so each layer passes its
+  `SharedConfig::from_file/from_string/from_json` factories and
+  `ssp4sim::ExecutorOptions::from_json()`
+  (`src/lib/public_include/shared_config.hpp`) are the only places that parse
+  configuration; `utils::Config` is an internal per-instance value, never a
+  process-global. Option structs are *nested* so each layer passes its
   slice straight through — no local re-aggregation:
   `SharedConfig::executor` is the `ssp4sim::ExecutorOptions`
-  (`ExecutorBuilder` is constructed with it), `ExecutorOptions::la2` *is* the
+  (the sole `ExecutorBuilder` input), `ExecutorOptions::la2` *is* the
   `ssp4sim::La2Options` consumed by `make_la2_stack`, and
   `SharedConfig::fmu` *is* the `ssp4sim::FmuModelConfig` handed to the model
   layer. Executors and models are constructed from these typed values and
-  never read the global config.
+  never parse configuration themselves.
 - **Dispatch is a variant registry over the typed options.** `ExecutorBuilder`
-  is constructed with `ssp4sim::ExecutorOptions` plus the outer macro step
-  (`SharedConfig::fmu.timestep`, the single source of truth for the configured
-  timestep) and holds a flat list of registered leaf variants
+  is constructed with only `ssp4sim::ExecutorOptions` and holds a flat list of
+  registered leaf variants
   (`ExecutorBuilder::variants_`). Each `Variant` is one concrete executor:
   a `selects` predicate over the options plus a uniform `(nodes) -> executor`
   factory reading only the builder's typed options. Every family registers its
@@ -99,10 +116,12 @@ LinearSubstepExecutor -> FmuModel`). When composing a stack:
   scans the registry and requires *exactly one* matching variant — no
   per-family branching: none match is a precise no-match error naming the
   method, more than one is an ambiguity error. The resolved factory builds the
-  specialized executor, then `build` applies the uniform macro wrap: always a
-  `MacroExecutor` sized from the configured macro step (the former
-  `RealtimeMacroExecutor` class was merged into it), with `options.realtime`
-  forwarded as its `const bool realtime` pacing flag.
+  specialized executor, which `build` returns directly. `SimulationEngine::run()`
+  owns the outer macro-step loop: it slices `[start_time, end_time]` by
+  `SharedConfig::fmu.timestep`, calls `RunControl::before_slice()` at each slice
+  top (pacing and due commands), invokes the executor on the slice, publishes
+  the last completed boundary before the recorder flush, and then
+  `RunControl::finish()` returns the effective result.
 - **la2 is a factory, not a class.** There is no `La2Scheduler` type;
   `make_la2_stack(nodes, La2Options)` (`executor/loop_aware/la2_builder.hpp`)
   is a config-free, pure construction function that SCC-partitions the graph,
@@ -160,9 +179,9 @@ Reusable building blocks that serve la2 but live outside it:
   inline in `invoke` (base sub-step + remainder spread over the first
   sub-steps); `GeometricSubstepExecutor` owns its schedule construction
   (`build_schedule` static). Both sweep the group in parallel per sub-step; use
-  them outside la2 to sub-step groups on equal or shrinking schedules. Both
-  accept an optional `const bool realtime = false` that paces every emitted
-  sub-step to the wall clock (shared `ExecutorBase::wait_for_realtime_sync`).
+  them outside la2 to sub-step groups on equal or shrinking schedules. They
+  take no pacing parameter: the engine's outer loop owns pacing via
+  `RunControl::before_slice()`.
   `LinearSubstepExecutor` requires `iterations` >= 1 (its constructor throws on
   0); `GeometricSubstepExecutor` requires a factor in (0, 1) and shrinks each
   sub-step by `factor` until the remaining time is at or below its absolute

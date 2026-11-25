@@ -1,115 +1,169 @@
 #include "simulator.hpp"
 
-#include "config.hpp"
-#include "simulation.hpp"
-#include "ssp4cpp/ssp.hpp"
-#include "ssp4cpp/utils/log.hpp"
-#include "shared_config.hpp"
+#include "simulation/simulation_engine.hpp"
 
-#include <filesystem>
-#include <exception>
+#include <future>
+#include <memory>
+#include <mutex>
 #include <stdexcept>
-#include <string>
+#include <thread>
+#include <utility>
 
 namespace ssp4sim
 {
     struct SimulatorPrivate
     {
-        ssp4cpp::utils::log::Logger* log;
+        std::unique_ptr<SimulationEngine> engine;
 
-        std::unique_ptr<ssp4cpp::Ssp> ssp;
-        std::unique_ptr<Simulation> sim;
-        std::unique_ptr<SharedConfig> conf;
+        // Run-thread ownership lives here; the execution body itself is
+        // SimulationEngine::run().
+        std::mutex run_mutex;
+        std::thread run_thread;
+        std::shared_future<RunResult> run_future;
+        bool run_started = false;
     };
 
-
     Simulator::Simulator(const std::string config_path)
-        : p(std::make_unique<SimulatorPrivate>())
+        : Simulator(SharedConfig::from_file(config_path))
     {
-        p->log = ssp4cpp::utils::log::simple_logger();
-        LOG_INFO(p->log, "[{func}] Setting up Simulator", __func__);
-
-        LOG_INFO(p->log, "[{func}] - Loading config: {config}", __func__, config_path);
-        if (!std::filesystem::exists(config_path))
-        {
-            LOG_ERROR(p->log, "Config file does not exist: {config_path}", config_path);
-            throw std::runtime_error("Config file does not exist: " + config_path);
-        }
-
-        utils::Config::loadFromFile(config_path);
-        LOG_DEBUG(p->log, "[{func}] - Config loaded:\n{config}\n", __func__, utils::Config::as_string());
-
-        // need to be constructed after Config::loadFromFile
-        p->conf = std::make_unique<SharedConfig>(p->log);
-
-        LOG_INFO(p->log, "[{func}] - Working directory: {}", __func__, p->conf->working_dir.c_str());
-        
-        std::filesystem::create_directories(p->conf->working_dir);
-
-        if (!p->conf->log_file.parent_path().empty())
-        {
-            std::filesystem::create_directories(p->conf->log_file.parent_path());
-        }
-
-        if (p->conf->level_terminal != "disable")
-        {
-            ssp4cpp::utils::log::add_console(quill::loglevel_from_string(p->conf->level_terminal));
-        }
-        
-        if (p->conf->level_file != "disable")
-        {
-            ssp4cpp::utils::log::add_file_sink(p->conf->log_file.string(), quill::loglevel_from_string(p->conf->level_file));
-        }
-        
-        if (p->conf->level_json != "disable")
-        {
-            ssp4cpp::utils::log::add_json_sink(p->conf->log_file.string() + ".json",  quill::loglevel_from_string(p->conf->level_json));
-        }
-        
-        if (p->conf->level_cutelog != "disable")
-        {
-            try
-            {
-                ssp4cpp::utils::log::add_cutelog_sink("127.0.0.1", 19996, quill::loglevel_from_string(p->conf->level_cutelog));
-            }
-            catch (const std::exception &e)
-            {
-                LOG_WARNING(p->log, "[{func}] Cutelog sink disabled: {}", __func__, e.what());
-            }
-        }
-
-        ssp4cpp::utils::log::init_logging();
-
-        p->log = ssp4cpp::utils::log::make_logger("ssp4sim.Simulator");
-
-        LOG_DEBUG(p->log, "[{func}] - Importing SSP", __func__);
-        p->ssp = std::make_unique<ssp4cpp::Ssp>(p->conf->ssp_path, p->conf->ssd);
-        LOG_DEBUG(p->log, "[{func}] -- SSP: {ssp}", __func__, p->ssp->to_string());
-
-        LOG_DEBUG(p->log, "[{func}] - Creating simulation\n", __func__);
-        p->sim = std::make_unique<Simulation>(p->ssp.get(), p->conf.get());
     }
 
-    Simulator::~Simulator() = default;
+    Simulator::Simulator(SharedConfig config,
+                         ssp4cpp::utils::log::Logger *log)
+        : p(std::make_unique<SimulatorPrivate>())
+    {
+        p->engine = std::make_unique<SimulationEngine>(std::move(config), log);
+    }
+
+    Simulator::~Simulator()
+    {
+        if (!p)
+        {
+            return;
+        }
+
+        // A live run must be stopped and joined before the engine (recorder,
+        // graph and FMUs) is torn down. Stop exits at the next macro boundary
+        // and the recorder still flushes partial results (see
+        // SimulationEngine::run()).
+        if (p->run_started)
+        {
+            p->engine->request_stop();
+            try
+            {
+                wait();
+            }
+            catch (...)
+            {
+                // Destructors must not throw; run() already logged the failure.
+            }
+        }
+
+        if (p->run_thread.joinable())
+        {
+            p->run_thread.join();
+        }
+    }
 
     void Simulator::init()
     {
-        if (!p || !p->sim)
-        {
-            throw std::runtime_error("Simulator is not initialized");
-        }
-        LOG_INFO(p->log, "[{func}] Initializing Simulator\n", __func__);
-        p->sim->init();
+        p->engine->init();
     }
 
     void Simulator::simulate()
     {
-        if (!p || !p->sim)
-        {
-            throw std::runtime_error("Simulator is not initialized");
-        }
-        LOG_INFO(p->log, "[{func}] Starting Simulator\n", __func__);
-        p->sim->simulate();
+        start();
+        wait();
     }
 
+    void Simulator::start()
+    {
+        if (!p->engine->initialized())
+        {
+            throw std::runtime_error("Simulator::start() called before init()");
+        }
+
+        std::packaged_task<RunResult()> task(
+            [engine = p->engine.get()]() { return engine->run(); });
+        auto future = task.get_future().share();
+
+        {
+            std::lock_guard<std::mutex> lock(p->run_mutex);
+            if (p->run_started)
+            {
+                throw std::logic_error("Simulator::start() called more than once");
+            }
+
+            // Construct the thread before publishing run_started; if
+            // construction throws, run_started stays false and wait() cannot
+            // hang.
+            std::thread thread(std::move(task));
+            p->run_thread = std::move(thread);
+            p->run_future = future;
+            p->run_started = true;
+        }
+
+        // Start barrier: the run thread publishes Running or a terminal
+        // pre-run state. Wait outside run_mutex so the run thread and wait()
+        // are never blocked by the start call.
+        p->engine->wait_until_started();
+    }
+
+    RunResult Simulator::wait()
+    {
+        std::shared_future<RunResult> future;
+        std::thread thread;
+        {
+            std::lock_guard<std::mutex> lock(p->run_mutex);
+            if (!p->run_started)
+            {
+                throw std::logic_error("Simulator::wait() called before start()");
+            }
+            future = p->run_future;
+            // Take ownership of the thread so the join happens outside the
+            // mutex; a repeated wait() sees a non-joinable member and is a
+            // no-op.
+            thread = std::move(p->run_thread);
+        }
+
+        future.wait();
+        if (thread.joinable())
+        {
+            thread.join();
+        }
+
+        // Rethrows the failure (if any) captured by SimulationEngine::run().
+        return future.get();
+    }
+
+    void Simulator::pause(std::optional<uint64_t> at_sim_time_ns)
+    {
+        p->engine->pause(at_sim_time_ns);
+    }
+
+    void Simulator::resume()
+    {
+        p->engine->resume();
+    }
+
+    void Simulator::stop(std::optional<uint64_t> at_sim_time_ns)
+    {
+        p->engine->stop(at_sim_time_ns);
+    }
+
+    void Simulator::set_speed(double speed,
+                              std::optional<uint64_t> at_sim_time_ns)
+    {
+        p->engine->set_speed(speed, at_sim_time_ns);
+    }
+
+    RunInfo Simulator::info() const
+    {
+        return p->engine->info();
+    }
+
+    void Simulator::wait_until_started()
+    {
+        p->engine->wait_until_started();
+    }
 }

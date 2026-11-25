@@ -6,7 +6,6 @@
         "stop_time": 1.0,
         "timestep": 0.001,
         "tolerance": 1e-4,
-        "realtime": false,
         "working_dir": "./wd/loop_aware_nested",
         "executor": {
             "method": "la2",

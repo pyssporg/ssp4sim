@@ -84,7 +84,6 @@ def write_la2_compat_config(
     simulation["stop_time"] = 0.25
     simulation["timestep"] = 0.001
     simulation["tolerance"] = 1e-4
-    simulation["realtime"] = False
     simulation["working_dir"] = str(workdir)
 
     executor = simulation["executor"]

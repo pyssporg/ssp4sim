@@ -1,21 +1,53 @@
 classDiagram
 
 class Simulator {
-  +ssp: std::unique_ptr<Ssp>
-  +sim: std::unique_ptr<Simulation>
-  +Simulator(ssp_path, props_path)
+  +engine: std::unique_ptr<SimulationEngine>
+  +run_mutex: std::mutex
+  +run_thread: std::thread
+  +run_future: std::shared_future<RunResult>
+  +run_started: bool
+  +Simulator(config)
   +init()
   +simulate()
+  +start()
+  +info() RunInfo
+  +wait()
 }
 
-class Simulation {
-  +ssp: Ssp*
-  +fmu_handler: std::unique_ptr<handler::FmuHandler>
+class SimulationEngine {
+  +ssp: std::unique_ptr<Ssp>
+  +conf: std::unique_ptr<SharedConfig>
+  +session_uuid: std::string
+  +sim_graph: pre::SimulationGraph
+  +sim: pre::SimulationData
   +recorder: std::unique_ptr<signal::DataRecorder>
-  +sim_graph: std::unique_ptr<graph::Graph>
-  +Simulation(ssp)
+  +simulation_node: std::shared_ptr<graph::Invocable>
+  +control: std::shared_ptr<control::RunControl>
   +init()
-  +simulate()
+  +run(): RunResult
+  +info() RunInfo
+}
+
+note for SimulationEngine "run() owns the outer macro-step loop: slices by the configured timestep, calls RunControl::before_slice() at each slice top, and publishes the last completed boundary before finalizing with RunControl::finish()"
+
+class RunControl {
+  +mutex_: std::mutex
+  +cv_: std::condition_variable
+  +deferred_: std::multimap
+  +state_: RunState
+  +sim_time_ns_: uint64_t
+  +speed_: double
+  +before_slice(slice_start_ns) bool
+  +publish_boundary(boundary_ns)
+  +request_stop()
+  +finish(result) RunResult
+  +info() RunInfo
+}
+
+class RunInfo {
+  +state: RunState
+  +sim_time_ns: uint64_t
+  +speed: double
 }
 
 
@@ -147,13 +179,15 @@ class Simulation {
   }
 
 
-Simulator *-- Simulation
-
-Simulation *-- FmuHandler
-Simulation *-- DataRecorder
-Simulation *-- Graph
-Simulation *--  GraphBuilder
-Simulation *--  AnalysisGraphBuilder
+Simulator *-- SimulationEngine
+SimulationEngine *-- RunControl
+SimulationEngine ..> RunInfo
+Simulator ..> RunInfo
+SimulationEngine *-- FmuHandler
+SimulationEngine *-- DataRecorder
+SimulationEngine *-- Graph
+SimulationEngine *--  GraphBuilder
+SimulationEngine *--  AnalysisGraphBuilder
 AnalysisGraph --> GraphBuilder
 
 FmuHandler *-- "many" FmuInfo

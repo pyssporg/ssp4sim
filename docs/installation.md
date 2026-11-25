@@ -17,6 +17,7 @@ Tagged releases (`v*`) publish dual artifacts:
 The Linux tarball is produced by `cmake --install`. The install rules contribute:
 
 - `bin/sim_app`
+- `bin/ssp4simd` (local control daemon)
 - `python/pyssp4sim` (Python API package with native extension)
 - `lib/` and `include/` from the bundled third-party libraries
 - [`LICENSE`](../LICENSE) and generated `RELEASE.txt`
@@ -60,7 +61,8 @@ live in a source checkout, not in the tarball:
 sim_app /path/to/ssp4sim/resources/embrace/embrace.json
 ```
 
-Usage details are in [Usage](usage.md).
+Usage details are in [Usage](usage.md). The same tarball installs `ssp4simd`;
+its CLI and protocol are in [Control Daemon](usage.md#control-daemon).
 
 Runtime notes:
 

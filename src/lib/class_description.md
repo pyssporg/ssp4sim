@@ -1,11 +1,15 @@
 classDiagram
 
 class Simulator {
-    Coordinates loading of SSP archives and drives the simulation lifecycle.
+    Public lifecycle facade: owns the internal run thread and forwards setup, control, and queries to the engine; start() blocks until running or terminal.
 }
 
-class Simulation {
-    Owns runtime components required to execute a simulation step-by-step.
+class SimulationEngine {
+    Owns SSP import, the simulation graph, executors, recorder, and run control; runs the outer macro-step loop on the calling thread, slicing by the configured timestep, driving RunControl pacing via before_slice(), publishing the last completed boundary, and finalizing through RunControl::finish().
+}
+
+class RunControl {
+    Single owner of the run-control state machine: one mutex guards the plain state, time, speed, and pacing fields, and one ordered command queue.
 }
 
 class FmuHandler {
@@ -69,13 +73,13 @@ class SignalStorage {
     Allocates contiguous memory areas and metadata for stored signals.
 }
 
-Simulator *-- Simulation
-
-Simulation *-- FmuHandler
-Simulation *-- DataRecorder
-Simulation *-- Graph
-Simulation *--  GraphBuilder
-Simulation *--  AnalysisGraphBuilder
+Simulator *-- SimulationEngine
+SimulationEngine *-- RunControl
+SimulationEngine *-- FmuHandler
+SimulationEngine *-- DataRecorder
+SimulationEngine *-- Graph
+SimulationEngine *--  GraphBuilder
+SimulationEngine *--  AnalysisGraphBuilder
 AnalysisGraph --> GraphBuilder
 
 FmuHandler *-- "many" FmuInfo

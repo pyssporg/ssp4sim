@@ -52,6 +52,7 @@ Install rules are defined in:
 - [`CMakeLists.txt`](../CMakeLists.txt)
 - [`src/lib/CMakeLists.txt`](../src/lib/CMakeLists.txt)
 - [`src/public/ssp4sim_app/CMakeLists.txt`](../src/public/ssp4sim_app/CMakeLists.txt)
+- [`src/public/ssp4sim_server/CMakeLists.txt`](../src/public/ssp4sim_server/CMakeLists.txt)
 - [`src/public/python_api/CMakeLists.txt`](../src/public/python_api/CMakeLists.txt)
 
 ## Stage 4: Package artifacts
@@ -77,8 +78,9 @@ For manual runs (`workflow_dispatch`), artifacts are uploaded to the workflow ru
 ## Stage 6: Developer consumption
 
 Use the release tarball and wheel the same way described in [Installation](installation.md)
-and [Usage](usage.md). The release assets expose `bin/sim_app` and
-`pyssp4sim`; the install and run commands are documented there.
+and [Usage](usage.md). The release assets expose `bin/sim_app`,
+`bin/ssp4simd`, and `pyssp4sim`; the install and run commands are documented
+there.
 
 ## Local Release Parity
 

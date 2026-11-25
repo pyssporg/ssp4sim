@@ -2,20 +2,19 @@
 // strategy (patch task P1: findings A, B-keys, C, E).
 //
 // Verifies:
-// (a) the centralized parser, `ssp4sim::ExecutorOptions::load()` (called from
-//     SharedConfig), reads `simulation.executor.*` and ignores the legacy
+// (a) the centralized parser, `ssp4sim::ExecutorOptions::from_json()` (called
+//     from SharedConfig), reads `simulation.executor.*` and ignores the legacy
 //     `simulation.executor.loop_aware.*` namespace;
 // (b) `ExecutorBuilder` accepts both `la2` and the legacy `loop_aware` method
-//     names and dispatches both to the la2 strategy's SerialSeidel stack,
-//     wrapped in a MacroExecutor;
+//     names and dispatches both to the la2 strategy's SerialSeidel stack;
 // (c) legacy mode values "fixed" / "geometric" map to the same behavior as
 //     "linear" / "factor";
 // (d) requesting "parallel_seidel" throws a clear std::runtime_error at
 //     dispatch time.
 //
 // Behavior is verified through `ExecutorBuilder` over typed `ExecutorOptions`
-// (the parser is exercised independently in (a)); no executor reads the global
-// utils::Config.
+// (the parser is exercised independently in (a)); no executor reads any global
+// config.
 //
 // Executors share ownership of their nodes (std::shared_ptr), so the test
 // builds shared graphs and hands a shared copy to each executor; a raw-pointer
@@ -23,19 +22,17 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include "config.hpp"
 #include "executor/seidel/seidel_serial.hpp"
 #include "executor_builder.hpp"
-#include "executor/substep/macro_substep_executor.hpp"
 #include "shared_config.hpp"
+
+#include <nlohmann/json.hpp>
 
 #include <cstdint>
 #include <memory>
 #include <stdexcept>
 #include <string>
 #include <vector>
-
-using ssp4sim::utils::Config;
 
 namespace
 {
@@ -121,12 +118,11 @@ namespace
     }
 
     constexpr uint64_t T0 = 0;
-    // The configured timestep (1200 ns, one macro step == T1) so build()
-    // returns an executor whose single macro step covers exactly [0, 1200)).
-    // 1200 is chosen so the Linear-mode sub-step split (sub_dt = macro / n,
-    // integer division) yields exactly n sub-steps for every iteration count
-    // used in these tests (2, 3, 4): 1200 / 2 = 600, 1200 / 3 = 400,
-    // 1200 / 4 = 300.
+    // The direct-invocation slice span used by the la2 behavior sections is
+    // [T0, T1) = [0, 1200). 1200 is chosen so the Linear-mode sub-step split
+    // (sub_dt = span / n, integer division) yields exactly n sub-steps for
+    // every iteration count used in these tests (2, 3, 4): 1200 / 2 = 600,
+    // 1200 / 3 = 400, 1200 / 4 = 300.
     constexpr uint64_t T1 = 1200;
 
     ssp4sim::ExecutorOptions la2_options(const char *mode, int iterations)
@@ -139,12 +135,12 @@ namespace
     }
 } // namespace
 
-TEST_CASE("ExecutorOptions::load reads la2.* keys and ignores legacy loop_aware.*",
+TEST_CASE("ExecutorOptions::from_json reads la2.* keys and ignores legacy loop_aware.*",
           "[la2][config][compat]")
 {
     SECTION("legacy loop_aware keys alone fall back to la2 defaults")
     {
-        Config::loadFromString(R"json({
+        const auto data = nlohmann::json::parse(R"json({
             "simulation": {
                 "timestep": 1e-6,
                 "executor": {
@@ -152,9 +148,9 @@ TEST_CASE("ExecutorOptions::load reads la2.* keys and ignores legacy loop_aware.
                     "loop_aware": { "iterations": 4, "mode": "fixed" }
                 }
             }
-        })json");
+        })json", nullptr, true, true);
 
-        const auto options = ssp4sim::ExecutorOptions::load();
+        const auto options = ssp4sim::ExecutorOptions::from_json(data);
         REQUIRE(options.method == "la2");
         REQUIRE(options.la2.iterations == -1);   // default: SCC node count
         REQUIRE(options.la2.mode == "linear");
@@ -163,7 +159,7 @@ TEST_CASE("ExecutorOptions::load reads la2.* keys and ignores legacy loop_aware.
 
     SECTION("la2.* keys are honored alongside ignored legacy loop_aware.* keys")
     {
-        Config::loadFromString(R"json({
+        const auto data = nlohmann::json::parse(R"json({
             "simulation": {
                 "timestep": 1e-6,
                 "executor": {
@@ -172,9 +168,9 @@ TEST_CASE("ExecutorOptions::load reads la2.* keys and ignores legacy loop_aware.
                     "loop_aware": { "iterations": 6, "mode": "fixed" }
                 }
             }
-        })json");
+        })json", nullptr, true, true);
 
-        const auto options = ssp4sim::ExecutorOptions::load();
+        const auto options = ssp4sim::ExecutorOptions::from_json(data);
         REQUIRE(options.la2.iterations == 2);
         REQUIRE(options.la2.mode == "linear");
     }
@@ -188,17 +184,13 @@ TEST_CASE("executor_builder accepts legacy 'loop_aware' method name", "[la2][con
     std::vector<std::shared_ptr<MockNode>> storage;
     make_chain_graph(storage);
 
-    ssp4sim::graph::ExecutorBuilder builder(options, T1);
+    ssp4sim::graph::ExecutorBuilder builder(options);
     auto executor = builder.build(to_owned(storage));
 
     REQUIRE(executor != nullptr);
-    // build() wraps the specialized executor in a MacroExecutor; the legacy
-    // name must dispatch to the la2 strategy's SerialSeidel inside, not to a
-    // fallback.
-    auto *macro = dynamic_cast<ssp4sim::graph::MacroExecutor *>(executor.get());
-    REQUIRE(macro != nullptr);
-    REQUIRE(macro->nodes.size() == 1);
-    REQUIRE(dynamic_cast<ssp4sim::graph::SerialSeidel *>(macro->nodes[0].get()) != nullptr);
+    // The legacy name must dispatch to the la2 strategy's SerialSeidel, not to
+    // a fallback.
+    REQUIRE(dynamic_cast<ssp4sim::graph::SerialSeidel *>(executor.get()) != nullptr);
 }
 
 TEST_CASE("legacy mode aliases map to the new scheduler modes", "[la2][config][compat]")
@@ -208,7 +200,7 @@ TEST_CASE("legacy mode aliases map to the new scheduler modes", "[la2][config][c
         std::vector<std::shared_ptr<MockNode>> storage;
         auto nodes = make_loop_graph(storage);
 
-        ssp4sim::graph::ExecutorBuilder builder(la2_options("fixed", 3), T1);
+        ssp4sim::graph::ExecutorBuilder builder(la2_options("fixed", 3));
         auto executor = builder.build(to_owned(storage));
         executor->invoke(ssp4sim::graph::StepData(T0, T1));
 
@@ -229,7 +221,7 @@ TEST_CASE("legacy mode aliases map to the new scheduler modes", "[la2][config][c
         options.la2.factor = 0.5;
         options.la2.threshold = 150; // ns -> 3 sub-steps over [0, 1200)
 
-        ssp4sim::graph::ExecutorBuilder builder(options, T1);
+        ssp4sim::graph::ExecutorBuilder builder(options);
         auto executor = builder.build(to_owned(storage));
         executor->invoke(ssp4sim::graph::StepData(T0, T1));
 
@@ -245,7 +237,7 @@ TEST_CASE("legacy mode aliases map to the new scheduler modes", "[la2][config][c
         auto options = la2_options("geometric", 3);
         options.la2.factor = 1.5;
 
-        ssp4sim::graph::ExecutorBuilder builder(options, T1);
+        ssp4sim::graph::ExecutorBuilder builder(options);
         // GeometricSubstepExecutor rejects a shrink factor outside (0, 1);
         // the legacy equal-sub-step fallback was removed.
         REQUIRE_THROWS_AS(builder.build(to_owned(storage)), std::runtime_error);
@@ -262,7 +254,7 @@ TEST_CASE("executor_builder throws a clear error for parallel_seidel",
     std::vector<std::shared_ptr<MockNode>> storage;
     make_chain_graph(storage);
 
-    ssp4sim::graph::ExecutorBuilder builder(options, T1);
+    ssp4sim::graph::ExecutorBuilder builder(options);
     REQUIRE_THROWS_AS(builder.build(to_owned(storage)), std::runtime_error);
 
     // Also verify the message is clear and actionable.
@@ -289,7 +281,7 @@ TEST_CASE("unknown executor method still throws with the method name",
     std::vector<std::shared_ptr<MockNode>> storage;
     make_chain_graph(storage);
 
-    ssp4sim::graph::ExecutorBuilder builder(options, T1);
+    ssp4sim::graph::ExecutorBuilder builder(options);
     REQUIRE_THROWS_AS(builder.build(to_owned(storage)), std::runtime_error);
 
     // The message must include the received method name.

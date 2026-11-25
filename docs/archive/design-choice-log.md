@@ -7,6 +7,7 @@ stream.
 
 | Date | ID | Decision | Layers | Status | Record |
 |---|---|---|---|---|---|
+| 2026-11-25 | AD-007 | Unix Domain Socket with Newline-Delimited JSON for the Local Control Daemon | architecture, implementation | accepted | `AD-007` |
 | 2026-11-11 | VD-004 | Reference SSP Fixtures Are Static and Version-Controlled | verification | accepted | `VD-004` |
 | 2026-11-11 | VD-003 | CSV Recorder Coverage Gap | verification | accepted | `VD-003` |
 | 2026-11-11 | VD-002 | Known Xfails Tracked as Pytest Markers | verification | accepted | `VD-002` |
