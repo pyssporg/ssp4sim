@@ -23,6 +23,13 @@ class StubBackend:
     def __init__(self):
         self.requests = []
         self.subscriptions = []
+        self.state_response = {
+            "v": 1,
+            "ok": True,
+            "state": "paused",
+            "sim_time": 1.0,
+            "speed": 2.0,
+        }
 
     def status(self):
         return {"backend": "stub", "connected": True, "detail": "in-memory"}
@@ -30,7 +37,7 @@ class StubBackend:
     def send(self, request, timeout=10.0):
         self.requests.append(dict(request))
         if request.get("cmd") == "state":
-            return {"v": 1, "ok": True, "state": "paused", "sim_time": 1.0, "speed": 2.0}
+            return dict(self.state_response)
         return {"v": 1, "ok": True}
 
     def subscribe(self):
@@ -112,6 +119,23 @@ def test_command_proxy_strips_envelope_and_whitelists(client):
 
     rejected = client.post("/api/command", json={"cmd": "rm"})
     assert rejected.status_code == 400
+
+
+def test_state_passes_through_optional_session_snapshot(client):
+    snapshot = {
+        "v": 1,
+        "ok": True,
+        "state": "running",
+        "sim_time": 1.0,
+        "speed": 1.0,
+        "session_id": "session-1",
+        "artifacts": [{"kind": "csv", "path": "/abs/result.csv", "run_id": -1}],
+    }
+    client.backend.state_response = snapshot
+
+    response = client.get("/api/state")
+    assert response.status_code == 200
+    assert response.json() == snapshot
 
 
 def test_path_outside_roots_is_rejected(client):

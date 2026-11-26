@@ -34,6 +34,7 @@ namespace ssp4sim
         std::unique_ptr<ssp4cpp::Ssp> ssp;
         std::unique_ptr<SharedConfig> conf;
         std::string session_uuid;
+        RunIdentity identity;
 
         pre::SimulationGraph sim_graph; // model graph
         pre::SimulationData sim;        // executors, access rules
@@ -177,13 +178,20 @@ namespace ssp4sim
         LOG_INFO(p->log, "[{func}] - Init simulation graph", __func__);
         p->simulation_node->init();
 
+        p->identity.session_id = p->session_uuid;
         if (p->recorder)
         {
             LOG_INFO(p->log, "[{func}] - Initializing recorder", __func__);
             p->recorder->init();
+            p->identity.artifacts = p->recorder->artifacts();
         }
 
         p->initialized = true;
+    }
+
+    RunIdentity SimulationStepper::run_identity() const
+    {
+        return p->identity;
     }
 
     void SimulationStepper::start()

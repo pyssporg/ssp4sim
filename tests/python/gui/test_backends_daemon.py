@@ -271,6 +271,48 @@ def test_event_kinds_and_payloads_are_preserved():
         shutil.rmtree(directory, ignore_errors=True)
 
 
+def test_state_and_done_events_preserve_session_snapshot():
+    directory, path = _make_socket_dir()
+    server = FakeDaemon(path)
+    backend = None
+    try:
+        server.start()
+        backend = DaemonBackend(
+            path, connect_timeout=1.0, retry_interval=0.05
+        )
+        subscription = backend.subscribe()
+        artifacts = [{"kind": "csv", "path": "/abs/result.csv", "run_id": -1}]
+        events = [
+            {
+                "v": 1,
+                "event": "state",
+                "state": "running",
+                "session_id": "session-1",
+                "artifacts": artifacts,
+            },
+            {
+                "v": 1,
+                "event": "done",
+                "session_id": "session-1",
+                "artifacts": artifacts,
+            },
+        ]
+        server.events = events
+
+        backend.send({"cmd": "state"}, timeout=2.0)
+
+        for expected in events:
+            received = _wait_event(subscription, expected["event"])
+            assert received.data == expected
+            assert received.data["session_id"] == "session-1"
+            assert received.data["artifacts"] == artifacts
+    finally:
+        if backend is not None:
+            backend.close()
+        server.stop()
+        shutil.rmtree(directory, ignore_errors=True)
+
+
 def test_send_times_out_when_daemon_never_responds():
     directory, path = _make_socket_dir()
     server = FakeDaemon(path)

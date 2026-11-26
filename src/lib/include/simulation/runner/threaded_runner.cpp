@@ -302,6 +302,11 @@ namespace ssp4sim
         return p->control->info();
     }
 
+    RunIdentity ThreadedRunner::run_identity() const
+    {
+        return p->stepper->run_identity();
+    }
+
     void ThreadedRunner::request_stop()
     {
         p->control->request_stop();

@@ -57,6 +57,10 @@ namespace ssp4sim
         /// Coherent read of state, simulation time and speed.
         RunInfo info() const;
 
+        /// Immutable per-run identity: stable session id and recorded
+        /// artifacts. Valid after init().
+        RunIdentity run_identity() const;
+
         /// Unconditional teardown; never throws. Pre-run cancellation publishes
         /// Stopped so the run thread and start barrier cannot hang.
         void request_stop();

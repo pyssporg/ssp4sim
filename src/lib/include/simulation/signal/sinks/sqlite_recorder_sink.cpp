@@ -467,4 +467,13 @@ namespace ssp4sim::signal
 
         stopped = true;
     }
+
+    std::optional<ssp4sim::RecordedArtifact> SqliteWALRecorderSink::artifact() const
+    {
+        if (disabled || !initialized || filename.empty())
+        {
+            return std::nullopt;
+        }
+        return ssp4sim::RecordedArtifact{"sqlite", filename.string(), run_id};
+    }
 }

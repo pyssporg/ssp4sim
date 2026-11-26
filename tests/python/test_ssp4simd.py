@@ -227,6 +227,26 @@ def read_csv_value(path: Path, column: str, at_time: float) -> float:
     return float(row[column])
 
 
+def assert_csv_identity(message: dict, workdir: Path) -> str:
+    """Assert the run identity fields and return the session id."""
+    session_id = message.get("session_id")
+    assert isinstance(session_id, str) and session_id, message
+
+    artifacts = message.get("artifacts")
+    assert isinstance(artifacts, list), message
+    assert len(artifacts) == 1, message
+
+    artifact = artifacts[0]
+    assert artifact["kind"] == "csv", artifact
+    assert artifact["run_id"] == -1, artifact
+
+    path = Path(artifact["path"])
+    assert path.is_absolute(), artifact
+    assert path == workdir / "result.csv", artifact
+    assert path.exists(), artifact
+    return session_id
+
+
 def test_lifecycle_and_shutdown(daemon: Daemon) -> None:
     # Known real output target in the fixture: model "gain", variable "gain.y".
     target = "gain.y"
@@ -241,6 +261,7 @@ def test_lifecycle_and_shutdown(daemon: Daemon) -> None:
         running = daemon.wait_event("state")
     assert running["state"] == "running", running
     assert running["sim_time"] >= 0.0
+    live_session = assert_csv_identity(running, daemon.workdir)
 
     time_event = daemon.wait_event("time")
     assert time_event["sim_time"] >= 0.0
@@ -253,28 +274,34 @@ def test_lifecycle_and_shutdown(daemon: Daemon) -> None:
     assert state["speed"] == pytest.approx(2.0)
     assert isinstance(state["sim_time"], float)
     assert state["sim_time"] >= 0.0
+    assert assert_csv_identity(state, daemon.workdir) == live_session
 
     assert daemon.response({"v": 1, "id": 6, "cmd": "pause"})["ok"]
     paused = daemon.wait_event("state")
     while paused["state"] != "paused":
         paused = daemon.wait_event("state")
     assert paused["state"] == "paused"
+    assert assert_csv_identity(paused, daemon.workdir) == live_session
 
     assert daemon.response({"v": 1, "id": 7, "cmd": "resume"})["ok"]
     resumed = daemon.wait_event("state")
     while resumed["state"] != "running":
         resumed = daemon.wait_event("state")
     assert resumed["state"] == "running"
+    assert assert_csv_identity(resumed, daemon.workdir) == live_session
 
     assert daemon.response({"v": 1, "id": 10, "cmd": "stop"})["ok"]
     done = daemon.wait_event("done")
     assert done["result"] == "stopped", done
+    assert assert_csv_identity(done, daemon.workdir) == live_session
 
     assert daemon.response({"v": 1, "id": 11, "cmd": "reset"})["ok"]
     state = daemon.response({"v": 1, "id": 12, "cmd": "state"})
     assert state["state"] == "initialized", state
     assert state["sim_time"] == 0.0, state
     assert state["speed"] == 1.0, state
+    reset_session = assert_csv_identity(state, daemon.workdir)
+    assert reset_session != live_session
 
     # A fresh run records the fixture's baseline result.
     assert daemon.response({"v": 1, "id": 14, "cmd": "set_speed", "speed": 0.0})[
@@ -286,6 +313,7 @@ def test_lifecycle_and_shutdown(daemon: Daemon) -> None:
     while done["result"] != "completed":
         done = daemon.wait_event("done", timeout=30.0)
     assert done["result"] == "completed"
+    assert assert_csv_identity(done, daemon.workdir) == reset_session
 
     result_file = daemon.workdir / "result.csv"
     assert read_csv_value(result_file, target, 0.2) == pytest.approx(3.0)
@@ -302,6 +330,7 @@ def test_reset_while_running(daemon: Daemon) -> None:
     running = daemon.wait_event("state")
     while running["state"] != "running":
         running = daemon.wait_event("state")
+    live_session = assert_csv_identity(running, daemon.workdir)
 
     reset = daemon.response({"v": 1, "id": 19, "cmd": "reset"}, timeout=10.0)
     assert reset["ok"], reset
@@ -309,10 +338,13 @@ def test_reset_while_running(daemon: Daemon) -> None:
     # The old live run reports its terminal events before the fresh state.
     stopped = daemon.wait_event("state")
     assert stopped["state"] == "stopped", stopped
+    assert assert_csv_identity(stopped, daemon.workdir) == live_session
     done = daemon.wait_event("done")
     assert done["result"] == "stopped", done
+    assert assert_csv_identity(done, daemon.workdir) == live_session
     initialized = daemon.wait_event("state")
     assert initialized["state"] == "initialized", initialized
+    assert assert_csv_identity(initialized, daemon.workdir) != live_session
 
     # Reset stops and waits for the live run, then rebuilds the runner.
     assert daemon.process.poll() is None

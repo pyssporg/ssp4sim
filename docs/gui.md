@@ -88,7 +88,14 @@ of these roots.
 | Console | On-demand dock tab for daemon events, command responses, and fetch errors; unread dot while hidden |
 
 Live plotting polls the active run every second and appends only new samples.
-The `done` event performs one final fetch and stops polling.
+On every state poll, the GUI consumes the daemon's optional `session_id` and
+absolute `artifacts`, opens the active CSV/SQLite artifact immediately, and
+tails it while the run is `running` or `paused`. It does not wait for `done`,
+so a GUI that connects mid-run still lands on the right file. The `done` event
+reuses the same snapshot for a final fetch and marks the run finished. Repeated
+polls never reopen the same session; a new `session_id` on the same path resets
+that run's samples. Older daemons without the snapshot keep the scan/refresh
+fallback.
 
 ## Layout
 
@@ -156,9 +163,12 @@ SQLite is readable while a run is in progress (WAL), but the sink commits every
 10,000 inserted rows, so SQLite is the better choice for post-run queries and
 run comparison, not for smooth live updates.
 
-There is no run manifest. Use `simulation.working_dir` per run or a `[TIME]`
-token in `simulation.recording.csv.file`; otherwise each run overwrites
-`working_dir/result.csv`.
+The daemon publishes a per-run `session_id` and absolute artifact paths in
+`state` and `done`; this is identity for the active run, not a full run
+manifest. Use `simulation.working_dir` per run or a `[TIME]` token in
+`simulation.recording.csv.file`; otherwise each run overwrites
+`working_dir/result.csv` and clients must use the new `session_id` to tell the
+runs apart.
 
 ## Security
 

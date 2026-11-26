@@ -45,6 +45,8 @@ namespace ssp4sim::signal
 
         void stop() override;
 
+        std::optional<ssp4sim::RecordedArtifact> artifact() const override;
+
     private:
         static constexpr std::size_t commit_interval = 10'000;
         std::size_t insert_count = 0;

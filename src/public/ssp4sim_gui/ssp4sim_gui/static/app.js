@@ -21,10 +21,16 @@ const state = {
   runsInFlight: false,
   discovered: [],
   selectedRunId: null,
+  snapshotHandled: new Set(),
+  snapshotClosed: new Set(),
+  snapshotErrors: new Set(),
+  pathSessions: new Map(),
+  finishedRunIds: new Set(),
   offline: false,
   simState: 'unknown',
   simTime: 0,
   speed: 1,
+  sessionId: null,
   backend: null,
   backendConnected: null,
   sseConnected: null,
@@ -42,6 +48,8 @@ const state = {
 };
 
 let filterTimer = null;
+
+let snapshotChain = Promise.resolve();
 
 let plot = null;
 
@@ -232,6 +240,153 @@ function resetRunData() {
   log('simulation time reset; cleared plotted samples', 'ok');
 }
 
+const SNAPSHOT_FINISHED_STATES = new Set(['completed', 'stopped', 'failed']);
+const SNAPSHOT_LIVE_STATES = new Set(['running', 'paused']);
+
+function snapshotFrom(body) {
+  if (!body || typeof body !== 'object') return null;
+  const sessionId =
+    typeof body.session_id === 'string' && body.session_id ? body.session_id : null;
+  const artifacts = Array.isArray(body.artifacts) ? body.artifacts : null;
+  if (!sessionId || !artifacts) return null;
+  const artifact = artifacts.find(
+    (item) => item && typeof item.path === 'string' && item.path,
+  );
+  if (!artifact) return null;
+  return { sessionId, path: artifact.path };
+}
+
+function findRunByPath(path) {
+  return [...state.runs.values()].find((entry) => entry.info.path === path) || null;
+}
+
+function resetRunSamples(runId) {
+  const entry = state.runs.get(runId);
+  if (!entry) return;
+  entry.cursors.clear();
+  entry.lastTime = null;
+  entry.finished = false;
+  let activeChanged = false;
+  for (const tab of state.tabs) {
+    for (const series of tab.series.values()) {
+      if (series.runId !== runId) continue;
+      series.t = [];
+      series.y = [];
+      if (tab.id === state.activeTabId) activeChanged = true;
+    }
+  }
+  if (activeChanged) syncActivePlot();
+  void refreshValues();
+}
+
+function applySnapshotFlags(entry, finished) {
+  entry.info.live = !finished;
+  entry.finished = finished;
+  if (finished) state.finishedRunIds.add(entry.info.run_id);
+  else state.finishedRunIds.delete(entry.info.run_id);
+}
+
+function selectSnapshotRun(runId) {
+  if (state.selectedRunId === null || state.selectedRunId === runId) selectRun(runId);
+}
+
+function logSnapshotFailure(key, err) {
+  if (state.snapshotErrors.has(key)) return;
+  state.snapshotErrors.add(key);
+  log(`auto-open run failed: ${errText(err)}`, 'err');
+}
+
+async function openArtifact(path) {
+  const data = await postJSON('/api/runs/open', { path });
+  if (data && data.ok === false) {
+    const error = data.error && typeof data.error === 'object' ? data.error : {};
+    throw new ApiError(
+      400,
+      error.code || 'open_failed',
+      error.message || 'open failed',
+    );
+  }
+  const info = data && data.run;
+  if (!info) throw new Error('server did not return run info');
+  return info;
+}
+
+async function applySnapshot(data, options = {}) {
+  const body = data && data.data && typeof data.data === 'object' ? data.data : data;
+  const snapshot = snapshotFrom(body);
+  if (!snapshot) return false;
+  const stateName = typeof body.state === 'string' ? body.state.toLowerCase() : '';
+  const finished = options.finished === true || SNAPSHOT_FINISHED_STATES.has(stateName);
+  if (!finished && !SNAPSHOT_LIVE_STATES.has(stateName)) return false;
+
+  const { sessionId, path } = snapshot;
+  const key = `${sessionId}\u0000${path}`;
+  if (state.snapshotClosed.has(sessionId)) return false;
+
+  const existing = findRunByPath(path);
+  if (state.snapshotHandled.has(key)) {
+    // Repeated polls of one snapshot only refresh flags; they never reopen.
+    if (existing) {
+      applySnapshotFlags(existing, finished);
+      if (finished) {
+        renderRunsList();
+        renderOpenRuns();
+        ensureLiveTimer();
+      }
+    }
+    return true;
+  }
+
+  const previousSession = state.pathSessions.get(path);
+  let info;
+  try {
+    // The store is the trust boundary: a path outside its roots is refused here.
+    info = await openArtifact(path);
+  } catch (err) {
+    logSnapshotFailure(key, err);
+    return false;
+  }
+
+  const entry = existing || state.runs.get(info.run_id);
+  const runId = entry ? entry.info.run_id : info.run_id;
+  if (entry) {
+    const sessionChanged =
+      (previousSession !== undefined && previousSession !== sessionId) ||
+      (entry.sessionId && entry.sessionId !== sessionId);
+    if (sessionChanged) resetRunSamples(runId);
+    entry.info = info;
+    entry.sessionId = sessionId;
+    entry.autoSession = sessionId;
+  } else {
+    addRun(info);
+    const added = state.runs.get(info.run_id);
+    if (added) {
+      added.sessionId = sessionId;
+      added.autoSession = sessionId;
+    }
+  }
+  state.pathSessions.set(path, sessionId);
+
+  const target = state.runs.get(runId);
+  if (target) applySnapshotFlags(target, finished);
+  state.snapshotHandled.add(key);
+
+  selectSnapshotRun(runId);
+  renderRunsList();
+  renderOpenRuns();
+  renderSignalTree();
+  ensureLiveTimer();
+  if (!finished) void pollLive(true);
+  return true;
+}
+
+function scheduleSnapshot(data, options) {
+  snapshotChain = snapshotChain
+    .then(() => applySnapshot(data, options))
+    .catch((err) => log(`state snapshot failed: ${errText(err)}`, 'err'));
+  return snapshotChain;
+}
+
 function applyState(data) {
   if (data === null || data === undefined) return;
   if (typeof data === 'string') {
@@ -245,9 +400,18 @@ function applyState(data) {
     return;
   }
   if (typeof body.state === 'string') state.simState = body.state.toLowerCase();
+  const sessionId =
+    typeof body.session_id === 'string' && body.session_id ? body.session_id : null;
+  if (sessionId) {
+    // A new session is authoritative. Never infer a reset from a small
+    // sim_time regression: state polls and time events can arrive out of order.
+    if (state.sessionId && sessionId !== state.sessionId) resetRunData();
+    state.sessionId = sessionId;
+  }
   if (body.sim_time !== null && body.sim_time !== undefined && Number.isFinite(Number(body.sim_time))) {
     const nextTime = Number(body.sim_time);
-    if (Number.isFinite(state.simTime) && nextTime + 0.001 < state.simTime) {
+    if (!sessionId && Number.isFinite(state.simTime) && nextTime + 0.001 < state.simTime) {
+      // Older daemons have no session id; keep the time-regression fallback.
       resetRunData();
     }
     state.simTime = nextTime;
@@ -255,6 +419,7 @@ function applyState(data) {
   if (body.speed !== null && body.speed !== undefined && Number.isFinite(Number(body.speed))) {
     state.speed = Number(body.speed);
   }
+  void scheduleSnapshot(body);
   updateControlUi();
   updateTimeUi();
   updateSpeedUi();
@@ -546,7 +711,10 @@ function renderRunsList() {
     const left = el('div', 'run-title');
     const head = el('div');
     head.appendChild(document.createTextNode(info.label || info.run_id));
-    if (info.live) {
+    const opened = state.runs.get(info.run_id);
+    // The daemon's done snapshot is authoritative; an open finished run must
+    // not keep the mtime-based LIVE marker from the discovery scan.
+    if (info.live && !(opened && opened.finished)) {
       const live = el('span', 'badge running', 'LIVE');
       live.style.marginLeft = '6px';
       head.appendChild(live);
@@ -969,6 +1137,9 @@ async function refreshRuns() {
       return;
     }
     state.discovered = Array.isArray(data?.runs) ? data.runs : [];
+    for (const run of state.discovered) {
+      if (state.finishedRunIds.has(run.run_id)) run.live = false;
+    }
     const fresh = new Map(state.discovered.map((run) => [run.run_id, run]));
     for (const entry of state.runs.values()) {
       const update = fresh.get(entry.info.run_id);
@@ -1059,6 +1230,8 @@ async function closeRun(runId) {
     return;
   }
 
+  const closing = state.runs.get(runId);
+  if (closing && closing.autoSession) state.snapshotClosed.add(closing.autoSession);
   state.runs.delete(runId);
   if (state.selectedRunId === runId) state.selectedRunId = null;
 
@@ -1513,7 +1686,19 @@ function onSseStatus(status) {
 
 async function handleDone(data) {
   const runId = data && (data.run_id || (data.data && data.data.run_id));
+  const doneSession =
+    data && typeof data.session_id === 'string'
+      ? data.session_id
+      : data && data.data && typeof data.data.session_id === 'string'
+        ? data.data.session_id
+        : null;
+  if (doneSession && state.sessionId && doneSession !== state.sessionId) {
+    log('ignoring done for a stale session', 'err');
+    return;
+  }
   log(`simulation done${runId ? ` for ${runId}` : ''}`, 'ok');
+  // A late connect or a very short run may only ever see the done snapshot.
+  await scheduleSnapshot(data, { finished: true });
   try {
     await pollLive(true);
   } catch (err) {
@@ -1533,6 +1718,7 @@ async function handleDone(data) {
           // not keep the run marked live after the engine reported it finished.
           entry.info.live = false;
           entry.finished = true;
+          state.finishedRunIds.add(id);
         }
         log(`run ${id} finished`, 'ok');
       }

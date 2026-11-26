@@ -618,6 +618,10 @@ TEST_CASE("stepper advances to an exact time and finishes", "[simulation][steppe
     REQUIRE(stepper.sim_time_ns() == 0);
     REQUIRE(stepper.end_time_ns() == end_time);
 
+    const auto identity = stepper.run_identity();
+    REQUIRE_FALSE(identity.session_id.empty());
+    REQUIRE(identity.artifacts.empty());
+
     stepper.start();
 
     const uint64_t target_ns = end_time / 2 + end_time / 20;

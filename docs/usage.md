@@ -327,7 +327,7 @@ commands; the daemon accepts at most eight clients.
 | `pause` | optional `at` (seconds) | `ok:true` |
 | `resume` | — | `ok:true` |
 | `stop` | optional `at` (seconds) | `ok:true` |
-| `state` | — | `ok:true`, `state`, `sim_time` (seconds), `speed` |
+| `state` | — | `ok:true`, `state`, `sim_time` (seconds), `speed`, `session_id`, `artifacts` |
 | `set_speed` | `speed` (finite, `>= 0`), optional `at` (seconds) | `ok:true` |
 | `reset` | — | `ok:true` |
 | `shutdown` | — | `ok:true`, then the daemon exits |
@@ -347,10 +347,23 @@ failure. Typical error codes include `bad_json`, `bad_version`, `bad_request`,
 
 | `event` | Fields | Meaning |
 |---|---|---|
-| `state` | `state`, `sim_time`, `speed` | A lifecycle state change. |
+| `state` | `state`, `sim_time`, `speed`, `session_id`, `artifacts` | A lifecycle state change. |
 | `time` | `sim_time`, `speed` | Progress while running or paused, throttled to about 10 Hz. |
-| `done` | `result`, `sim_time` | Terminal outcome; `result` is `completed`, `stopped`, or `failed`. |
+| `done` | `result`, `sim_time`, `session_id`, `artifacts` | Terminal outcome; `result` is `completed`, `stopped`, or `failed`. |
 | `error` | `code`, `message` | A simulation failure, emitted before `done`. |
+
+`session_id` is a per-run UUID, stable from initialization through the terminal
+`done` event and different after `reset`. `artifacts` lists the files this run
+records, CSV first, as absolute paths:
+
+```json
+{"kind":"csv","path":"/abs/wd/embrace/result.csv","run_id":-1}
+```
+
+`kind` is `csv` or `sqlite`; `run_id` is the SQLite internal run id and `-1`
+for CSV. The fields are present in the `state` response and `state` event
+while the run is live, so a late client can open the active artifact without
+scanning or waiting for `done`. `time` events stay lean and carry no identity.
 
 `time` events are droppable: a slow client can miss them and may be
 disconnected. `state`, `done`, and `error` events are not droppable.
@@ -398,10 +411,12 @@ $ ssp4simd --config ./resources/embrace/embrace.json --socket /tmp/ssp4sim.sock 
 $ python3 control_client.py
 {'v': 1, 'id': 1, 'ok': True}
 {'v': 1, 'id': 2, 'ok': True}
-event {'v': 1, 'event': 'state', 'state': 'running', 'sim_time': 0.0, 'speed': 2.0}
+event {'v': 1, 'event': 'state', 'state': 'running', 'sim_time': 0.0, 'speed': 2.0,
+       'session_id': 'b14ec63a-...', 'artifacts': [{'kind': 'csv', 'path': '/abs/wd/result.csv', 'run_id': -1}]}
 event {'v': 1, 'event': 'time', 'sim_time': 0.1, 'speed': 2.0}
 ...
-event {'v': 1, 'event': 'done', 'result': 'completed', 'sim_time': 10.0}
+event {'v': 1, 'event': 'done', 'result': 'completed', 'sim_time': 10.0,
+       'session_id': 'b14ec63a-...', 'artifacts': [{'kind': 'csv', 'path': '/abs/wd/result.csv', 'run_id': -1}]}
 ```
 
 ## Result Artifact Policy

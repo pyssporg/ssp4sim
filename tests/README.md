@@ -196,9 +196,10 @@ build artifact exists. This prevents high-level tests from accidentally passing
 against an unrelated installed wheel.
 
 `tests/python/gui/` covers the standalone GUI package: CSV/SQLite readers,
-daemon and offline control backends, static assets, and the HTTP API. Those
-tests import the package from `src/public/ssp4sim_gui`; the API tests skip when
-FastAPI/HTTPX are absent. See [GUI](../docs/gui.md).
+daemon and offline control backends, static assets, the HTTP API, and the
+`session_id`/`artifacts` snapshot pass-through and auto-open source contract.
+Those tests import the package from `src/public/ssp4sim_gui`; the API tests
+skip when FastAPI/HTTPX are absent. See [GUI](../docs/gui.md).
 
 A separate smoke test exercises the packaged CLI through `venv/bin/pyssp4sim`
 against the local `resources/embrace/embrace.json` fixture with temporary
@@ -264,7 +265,8 @@ Runtime control is covered at four levels:
   result string, and the coherent `info()` read-back, and
   `tests/python/test_ssp4simd.py` runs a live `ssp4simd` process and speaks the
   NDJSON protocol over its Unix-domain socket, including `reset` (also while
-  running, with terminal-event ordering), `shutdown`, and a failed run.
+  running, with terminal-event ordering), `shutdown`, a failed run, and the
+  stable per-run `session_id` plus absolute artifact paths in `state`/`done`.
 
 Variable overrides and override commands are planned/deferred and are not in
 current releases.

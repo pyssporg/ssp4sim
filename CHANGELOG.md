@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Per-run artifact identity over the control surface: `SimulationStepper` /
+  `ThreadedRunner` expose an immutable `RunIdentity` (`session_id` plus absolute
+  CSV/SQLite artifact paths), and `ssp4simd` includes it in the `state` response,
+  `state` event, and `done` event. The GUI consumes the optional snapshot to
+  open and tail the active artifact immediately on connect, including mid-run,
+  and to distinguish a reset that reuses the same output path.
 - Synchronous C ABI (`c_api/stepper_c_api.h`, `ssp4sim_stepper_*`) over the internal
   `SimulationStepper`: `create`, `init`, `start`, `step`, `advance_to`,
   `get_info`, `finish`, and `destroy`. `advance_to` consumes an exact target,

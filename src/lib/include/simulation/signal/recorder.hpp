@@ -6,6 +6,7 @@
 #include <shared_config.hpp>
 
 #include "ssp4sim_definitions.hpp"
+#include "runtime_control.hpp"
 
 #include "signal/storage.hpp"
 #include "signal/record_tracker.hpp"
@@ -14,6 +15,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <thread>
 #include <atomic>
 #include <string>
@@ -47,6 +49,13 @@ namespace ssp4sim::signal
         virtual void on_event(const NewDataEvent &event) = 0;
 
         virtual void stop() = 0;
+
+        /// Artifact this sink writes, if any. Called after init(); the path may
+        /// still be relative. Default: no artifact.
+        virtual std::optional<ssp4sim::RecordedArtifact> artifact() const
+        {
+            return std::nullopt;
+        }
     };
 
     class DataRecorder
@@ -80,6 +89,11 @@ namespace ssp4sim::signal
         void add_sink(std::unique_ptr<RecorderSink> sink);
 
         void init();
+
+        /// Artifacts reported by the sinks, in sink order. Paths are absolute
+        /// and lexically normalized; a failed conversion keeps the original
+        /// string. Call after init().
+        std::vector<ssp4sim::RecordedArtifact> artifacts() const;
 
         void start_recording();
 

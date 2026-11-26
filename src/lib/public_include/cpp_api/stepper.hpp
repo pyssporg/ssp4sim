@@ -1,6 +1,7 @@
 #pragma once
 
 #include "shared_config.hpp"
+#include "runtime_control.hpp"
 
 #include <cstdint>
 #include <memory>
@@ -42,6 +43,10 @@ namespace ssp4sim
         void init();
 
         bool initialized() const noexcept;
+
+        /// Immutable identity of this run: stable session id and recorded
+        /// artifacts. Valid after init().
+        RunIdentity run_identity() const;
 
         /// Validate the timestep and start the recorder.
         void start();

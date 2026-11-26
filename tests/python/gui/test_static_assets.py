@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[3]
 STATIC = ROOT / "src" / "public" / "ssp4sim_gui" / "ssp4sim_gui" / "static"
 INDEX = STATIC / "index.html"
 CSS = STATIC / "styles.css"
+APP = STATIC / "app.js"
 
 ATTRIBUTION = "Visual language adapted from sequence_extensions (MIT, © 2024 jkCXf9X4)."
 
@@ -221,3 +222,30 @@ def test_css_defines_the_palette() -> None:
         assert re.search(rf"--{re.escape(name)}:\s*{re.escape(value)};", css), (
             f"missing palette property --{name}: {value}"
         )
+
+
+def test_state_snapshot_handling_contract() -> None:
+    text = APP.read_text(encoding="utf-8")
+    assert "function applySnapshot(" in text
+    assert "function scheduleSnapshot(" in text
+    assert "void scheduleSnapshot(body);" in text
+    assert "body.session_id" in text
+    assert "body.artifacts" in text
+    assert "state.snapshotHandled" in text
+    assert "state.snapshotClosed" in text
+    assert "state.snapshotClosed.add" in text
+    # A new session on the same path must reset that run's cursors and samples.
+    assert "pathSessions" in text
+    assert "resetRunSamples(runId)" in text
+    # Session ids, not sim-time regressions, drive resets when available.
+    assert "state.sessionId" in text
+    assert "!sessionId && Number.isFinite(state.simTime)" in text
+    assert "ignoring done for a stale session" in text
+    # Auto-open must not steal focus from a run the user already selected.
+    assert "state.selectedRunId === null" in text
+    assert "function selectSnapshotRun(" in text
+    # The done handler consumes the snapshot before it marks runs finished.
+    assert "scheduleSnapshot(data, { finished: true })" in text
+    # A finished open run suppresses the discovery scan's mtime-based LIVE marker.
+    assert "opened && opened.finished" in text
+    assert "finishedRunIds" in text

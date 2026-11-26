@@ -114,6 +114,32 @@ TEST_CASE("DataRecorder initialization and cleanup", "[DataRecorder]")
 }
 
 // ---------------------------------------------------------------------------
+// Description: Verifies the recorder reports the CSV artifact with an absolute
+//              normalized path after init
+// Rationale:   Daemon clients need the exact artifact file of the live run
+// ---------------------------------------------------------------------------
+TEST_CASE("DataRecorder reports the CSV artifact", "[DataRecorder]")
+{
+    const fs::path test_filename = project_root / "build" / "test_recorder_artifact.csv";
+    remove_if_existing(test_filename);
+
+    DataRecorder recorder(false);
+    recorder.add_sink(std::make_unique<CsvRecorderSink>(test_filename, 1000));
+    recorder.init();
+
+    const auto artifacts = recorder.artifacts();
+    REQUIRE(artifacts.size() == 1);
+    REQUIRE(artifacts[0].kind == "csv");
+    REQUIRE(artifacts[0].run_id == -1);
+
+    const fs::path reported(artifacts[0].path);
+    REQUIRE(reported.is_absolute());
+    REQUIRE(reported == fs::absolute(test_filename).lexically_normal());
+
+    fs::remove(test_filename);
+}
+
+// ---------------------------------------------------------------------------
 // Description: Verifies storage registration count and CSV header line
 // Rationale:   CSV header must match registered signal names
 // ---------------------------------------------------------------------------

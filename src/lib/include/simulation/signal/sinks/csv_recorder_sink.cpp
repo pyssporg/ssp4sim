@@ -13,6 +13,7 @@ namespace ssp4sim::signal
 {
     CsvRecorderSink::CsvRecorderSink(const std::filesystem::path &filename, std::uint64_t interval, std::uint64_t flush_interval, bool record_derivatives)
         : log(ssp4cpp::utils::log::make_logger("ssp4sim.signal.CsvRecorderSink")),
+          filename(filename),
           recording_interval(interval),
           record_derivatives(record_derivatives),
           flush_interval(flush_interval)
@@ -258,5 +259,10 @@ namespace ssp4sim::signal
         {
             file.close();
         }
+    }
+
+    std::optional<ssp4sim::RecordedArtifact> CsvRecorderSink::artifact() const
+    {
+        return ssp4sim::RecordedArtifact{"csv", filename.string(), -1};
     }
 }

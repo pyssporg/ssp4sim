@@ -3,12 +3,27 @@
 
 #include "signal/storage.hpp"
 
+#include <filesystem>
 #include <memory>
+#include <system_error>
 #include <thread>
 #include <utility>
 
 namespace ssp4sim::signal
 {
+    namespace
+    {
+        std::string absolute_normalized(const std::string &path)
+        {
+            std::error_code error;
+            const auto absolute = std::filesystem::absolute(path, error);
+            if (error)
+            {
+                return path;
+            }
+            return absolute.lexically_normal().string();
+        }
+    }
 
     DataRecorder::DataRecorder(bool wait_for)
         : log(ssp4cpp::utils::log::make_logger("ssp4sim.signal.DataRecorder")),
@@ -71,6 +86,22 @@ namespace ssp4sim::signal
         {
             sink->init();
         }
+    }
+
+    std::vector<ssp4sim::RecordedArtifact> DataRecorder::artifacts() const
+    {
+        std::vector<ssp4sim::RecordedArtifact> result;
+        for (const auto &sink : sinks)
+        {
+            auto artifact = sink->artifact();
+            if (!artifact.has_value())
+            {
+                continue;
+            }
+            artifact->path = absolute_normalized(artifact->path);
+            result.emplace_back(std::move(*artifact));
+        }
+        return result;
     }
 
     void DataRecorder::start_recording()

@@ -43,6 +43,7 @@ namespace ssp4sim::signal
         ssp4cpp::utils::log::Logger *log = nullptr;
 
         std::ofstream file;
+        std::filesystem::path filename;
         std::vector<CsvStorageLayout> layouts;
         std::unordered_map<const SignalStorage *, std::size_t> layout_lookup;
 
@@ -76,6 +77,8 @@ namespace ssp4sim::signal
         void flush_progress();
 
         void stop() override;
+
+        std::optional<ssp4sim::RecordedArtifact> artifact() const override;
 
         void reset_row(std::uint16_t row);
 

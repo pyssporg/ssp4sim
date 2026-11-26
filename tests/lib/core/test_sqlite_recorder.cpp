@@ -210,6 +210,13 @@ TEST_CASE("T-001: SQLite sink writes events with mixed types and verifies via SE
     sink.on_storage_added(&storage);
     sink.on_storage_added(&aux_storage);
     sink.init();
+
+    const auto artifact = sink.artifact();
+    REQUIRE(artifact.has_value());
+    REQUIRE(artifact->kind == "sqlite");
+    REQUIRE(artifact->run_id == sink.run_id);
+    REQUIRE(fs::path(artifact->path) == db_path);
+
     sink.start();
 
     const auto timestamp = 3ULL * sim_time::nanoseconds_per_second + 123ULL;

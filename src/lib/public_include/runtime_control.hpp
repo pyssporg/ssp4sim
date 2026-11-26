@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
+#include <vector>
 
 namespace ssp4sim
 {
@@ -53,5 +55,21 @@ namespace ssp4sim
         RunState state = RunState::Created;
         uint64_t sim_time_ns = 0;
         double speed = 0.0;
+    };
+
+    /// One recorded artifact belonging to a run.
+    struct RecordedArtifact
+    {
+        std::string kind;    ///< "csv" or "sqlite"
+        std::string path;    ///< absolute, lexically normalized
+        int64_t run_id = -1; ///< SQLite internal run id; -1 for CSV
+    };
+
+    /// Immutable per-run identity: a stable session id and the artifacts this
+    /// run records, in sink order. Valid after SimulationStepper::init().
+    struct RunIdentity
+    {
+        std::string session_id;
+        std::vector<RecordedArtifact> artifacts;
     };
 }

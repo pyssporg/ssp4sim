@@ -61,13 +61,29 @@ namespace ssp4simd
             return true;
         }
 
-        json state_event(const ssp4sim::RunInfo &info)
+        json artifacts_json(const std::vector<ssp4sim::RecordedArtifact> &artifacts)
         {
-            return json{{"v", 1},
-                        {"event", "state"},
-                        {"state", state_to_string(info.state)},
-                        {"sim_time", ns_to_seconds(info.sim_time_ns)},
-                        {"speed", info.speed}};
+            json result = json::array();
+            for (const auto &artifact : artifacts)
+            {
+                result.push_back(json{{"kind", artifact.kind},
+                                      {"path", artifact.path},
+                                      {"run_id", artifact.run_id}});
+            }
+            return result;
+        }
+
+        json state_event(const ssp4sim::RunInfo &info,
+                         const ssp4sim::RunIdentity &identity)
+        {
+            json event{{"v", 1},
+                       {"event", "state"},
+                       {"state", state_to_string(info.state)},
+                       {"sim_time", ns_to_seconds(info.sim_time_ns)},
+                       {"speed", info.speed}};
+            event["session_id"] = identity.session_id;
+            event["artifacts"] = artifacts_json(identity.artifacts);
+            return event;
         }
 
         json time_event(const ssp4sim::RunInfo &info)
@@ -78,12 +94,16 @@ namespace ssp4simd
                         {"speed", info.speed}};
         }
 
-        json done_event(ssp4sim::RunResult result, uint64_t sim_time_ns)
+        json done_event(ssp4sim::RunResult result, uint64_t sim_time_ns,
+                        const ssp4sim::RunIdentity &identity)
         {
-            return json{{"v", 1},
-                        {"event", "done"},
-                        {"result", result_to_string(result)},
-                        {"sim_time", ns_to_seconds(sim_time_ns)}};
+            json event{{"v", 1},
+                       {"event", "done"},
+                       {"result", result_to_string(result)},
+                       {"sim_time", ns_to_seconds(sim_time_ns)}};
+            event["session_id"] = identity.session_id;
+            event["artifacts"] = artifacts_json(identity.artifacts);
+            return event;
         }
 
         json error_event(const std::string &code, const std::string &message)
@@ -256,10 +276,13 @@ namespace ssp4simd
     json Daemon::do_state(const json &id)
     {
         const auto info = runner_->info();
+        const auto identity = runner_->run_identity();
         json response = make_ok(id);
         response["state"] = state_to_string(info.state);
         response["sim_time"] = ns_to_seconds(info.sim_time_ns);
         response["speed"] = info.speed;
+        response["session_id"] = identity.session_id;
+        response["artifacts"] = artifacts_json(identity.artifacts);
         return response;
     }
 
@@ -282,7 +305,7 @@ namespace ssp4simd
         runner_ = std::move(fresh);
         const auto info = runner_->info();
         reset_monitor_baseline(info);
-        emit(state_event(info));
+        emit(state_event(info, runner_->run_identity()));
         return make_ok(id);
     }
 
@@ -316,13 +339,14 @@ namespace ssp4simd
 
         const auto now = clock::now();
         const auto info = runner_->info();
+        const auto identity = runner_->run_identity();
         const auto state = info.state;
         const bool state_changed = state != observed_state_;
 
         if (state_changed)
         {
             observed_state_ = state;
-            emit(state_event(info));
+            emit(state_event(info, identity));
             last_time_emit_ = now;
             last_time_sim_ns_ = info.sim_time_ns;
 
@@ -350,7 +374,7 @@ namespace ssp4simd
                 }
 
                 emit(done_event(ssp4sim::terminal_result(state),
-                                info.sim_time_ns));
+                                info.sim_time_ns, identity));
             }
         }
         else if (state == ssp4sim::RunState::Running ||
