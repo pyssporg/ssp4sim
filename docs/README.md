@@ -18,6 +18,7 @@ This page indexes the SSP4SIM documentation. See [breakdown/README.md](breakdown
 ## Usage
 
 - [Usage](usage.md) — CLI and Python invocation, example configs, output formats
+- [GUI](gui.md) — separate local web control panel and result viewer
 - [Configuration](configuration.md) — JSON key reference, types, defaults
 - [Choosing an Executor Algorithm](executor_choice.md) — what each executor does and how to pick one
 - [Logging](logging_guidlines.md) — levels, hot-path guidance, sink setup

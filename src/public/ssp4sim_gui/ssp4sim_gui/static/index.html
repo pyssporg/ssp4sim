@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ssp4sim lab</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header id="topbar" class="topbar">
+    <div class="brand">
+      <span class="brand-name">ssp4sim</span>
+      <span class="brand-sub">lab</span>
+    </div>
+    <div class="topbar-status">
+      <span id="backend-dot" class="dot warn" aria-hidden="true"></span>
+      <span id="backend-text" class="backend-text">backend: connecting</span>
+      <span class="topbar-sep" aria-hidden="true">/</span>
+      <span id="version-text" class="version-text">v0.0.0</span>
+    </div>
+  </header>
+
+  <section id="control-ribbon" class="control-ribbon" aria-label="Simulation control">
+    <section id="control-card" class="control-card">
+      <h2>Control</h2>
+      <div class="control-state">
+        <span id="state-badge" class="badge">idle</span>
+        <span class="control-label">sim time</span>
+        <span id="sim-time" class="sim-time">0.000 s</span>
+      </div>
+      <div class="speed-row">
+        <label class="control-label" for="speed-input">speed</label>
+        <span id="speed-readout" class="speed-readout">1.0&times;</span>
+        <input id="speed-input" type="number" min="0" step="0.1" value="1" inputmode="decimal" aria-label="Simulation speed">
+        <button id="btn-set-speed" class="btn ghost small" type="button">Set</button>
+      </div>
+      <div class="button-grid">
+        <button id="btn-start" class="btn primary" type="button">Start</button>
+        <button id="btn-pause" class="btn ghost" type="button">Pause</button>
+        <button id="btn-resume" class="btn primary" type="button">Resume</button>
+        <button id="btn-stop" class="btn warn" type="button">Stop</button>
+        <button id="btn-reset" class="btn ghost" type="button">Reset</button>
+      </div>
+      <p id="control-note" class="note">Idle. Connect to a backend or load a recorded run.</p>
+    </section>
+  </section>
+
+  <div id="layout" class="layout">
+    <aside id="sidebar" class="sidebar">
+      <section id="signals-card" class="card signals-card">
+        <div class="card-heading">
+          <h2>Signals <span id="signal-count" class="count">0</span></h2>
+        </div>
+        <input id="signal-filter" type="search" placeholder="Search model, storage, signal…" spellcheck="false" autocomplete="off" aria-label="Filter signals">
+        <div class="tree-actions">
+          <button id="btn-expand-all" class="btn ghost small" type="button">Expand all</button>
+          <button id="btn-collapse-all" class="btn ghost small" type="button">Collapse all</button>
+          <label class="check"><input id="chk-selected-only" type="checkbox"> Selected only</label>
+        </div>
+        <div class="button-row">
+          <button id="btn-plot-selected" class="btn primary small" type="button">Add selected</button>
+          <button id="btn-clear-selection" class="btn ghost small" type="button">Clear</button>
+        </div>
+        <p class="muted small tree-hint">Checking a signal adds it to the active plot; remove it with the legend ×.</p>
+        <div id="signal-tree" class="tree" aria-label="Signal tree"></div>
+      </section>
+    </aside>
+
+    <main id="content" class="content">
+      <section id="plot-wrap" class="plot-wrap" aria-label="Plots">
+        <div class="plot-toolbar">
+          <div id="plot-tabs" class="tabs" role="tablist" aria-label="Plot tabs"></div>
+          <div class="plot-actions">
+            <span id="plot-status" class="plot-status">idle</span>
+            <button id="btn-fit" class="btn ghost small" type="button">Fit</button>
+            <button id="btn-follow" class="btn ghost small" type="button" aria-pressed="false">Follow</button>
+            <button id="btn-normalize" class="btn ghost small" type="button" aria-pressed="false">Normalize</button>
+            <button id="btn-clear-plot" class="btn ghost small" type="button">Clear</button>
+          </div>
+        </div>
+        <div class="plot-stage">
+          <canvas id="plot-canvas" class="plot-canvas" aria-label="Plot canvas"></canvas>
+          <div id="plot-empty" class="empty">No signals selected</div>
+          <div id="plot-tooltip" class="tooltip hidden" role="status"></div>
+          <div id="plot-legend" class="legend" aria-label="Plot legend"></div>
+        </div>
+      </section>
+
+      <section id="dock" class="dock" aria-label="Dock" data-tab="values">
+        <div id="dock-tabs" class="dock-tabs" role="tablist" aria-label="Dock panels">
+          <div id="tab-values" class="dock-tab active" role="tab" tabindex="0" aria-selected="true">
+            Values <span id="values-count" class="count">0</span>
+          </div>
+          <div id="tab-console" class="dock-tab" role="tab" tabindex="0" aria-selected="false">Console</div>
+          <span class="dock-spacer"></span>
+          <span id="values-hint" class="muted small values-hint">override: y = kx + m</span>
+          <button id="btn-clear-log" class="btn ghost small" type="button">Clear console</button>
+        </div>
+
+        <section id="values" class="dock-panel values-panel" aria-label="Latest values">
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>Run</th><th>Signal</th><th>Value</th><th>Override</th><th>Time</th></tr></thead>
+              <tbody id="values-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="console" class="dock-panel console-panel hidden" aria-label="Console">
+          <div id="console-lines" class="console" role="log" aria-live="polite" aria-label="Console output"></div>
+        </section>
+      </section>
+    </main>
+
+    <aside id="runs-ribbon" class="runs-ribbon" aria-label="Runs">
+      <section id="runs-card" class="card runs-card">
+        <div class="card-heading">
+          <h2>Runs</h2>
+          <button id="btn-refresh-runs" class="btn ghost small" type="button">Refresh</button>
+        </div>
+        <div class="path-row">
+          <input id="path-input" type="text" placeholder="/path/to/results" spellcheck="false" autocomplete="off" aria-label="Result path">
+          <button id="btn-open-path" class="btn primary small" type="button">Open</button>
+        </div>
+        <div class="list-label">Discovered</div>
+        <div id="runs-list" class="list" aria-label="Discovered runs"></div>
+        <div class="list-label">Open runs</div>
+        <div id="open-runs" class="list open-runs" aria-label="Open runs"></div>
+      </section>
+    </aside>
+  </div>
+
+  <footer id="footer" class="footer">Visual language adapted from sequence_extensions (MIT, © 2024 jkCXf9X4).</footer>
+
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>

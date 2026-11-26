@@ -25,4 +25,5 @@ summary: Improvement candidates not yet selected for development
 - **IMP-051** [Set the read target resolver during the pipeline](IMP-051.md) — Design and set the read target resolver during the pipeline build before patching
 - **IMP-052** [Executors take ownership of invocables](IMP-052.md) — All executors should take ownership of the invocables passed to them, propagating the top-layer refactor downward
 - **IMP-053** [Atomic id counter and static max_id on Node for vector indexing](IMP-053.md) — Give Node an atomic id and static max_id so node lookup becomes vector indexing, replacing the Invocable id
+- **IMP-054** [Daemon API stability, run manifest, and parameter mutation](daemon-api-stability-run-manifest-and-parameter-mutation.md) — Stabilize the daemon contract, add run manifest/discovery, and add parameter mutation exposed by the GUI's limits
 <!-- pb:index:end -->

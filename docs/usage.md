@@ -36,6 +36,20 @@ sim_app --help
 Simulation input is controlled by the JSON file passed to `sim_app`. The full
 configuration key reference is in [Configuration](configuration.md).
 
+## Graphical Interface
+
+`ssp4sim-gui` is a separate local web frontend for the control daemon and for
+CSV/SQLite result files. It does not replace `sim_app` and is not built by
+CMake:
+
+```bash
+pip install -e src/public/ssp4sim_gui
+ssp4sim-gui --daemon-socket /tmp/ssp4sim.sock --results-dir ./wd
+ssp4sim-gui --offline --results-dir ./wd        # existing results only
+```
+
+See [GUI](gui.md) for the architecture, live-data caveats, security, and tests.
+
 Example configs:
 
 - [`resources/embrace/embrace.json`](../resources/embrace/embrace.json)

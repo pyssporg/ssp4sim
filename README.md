@@ -79,6 +79,7 @@ For structured per-layer documentation, see the [breakdown](docs/breakdown/) dir
 - [Installation](docs/installation.md): release tarball and wheel consumption.
 - [Build from source](docs/build_from_source.md): local and container builds.
 - [Usage](docs/usage.md): CLI, Python API, examples, and result artifacts.
+- [GUI](docs/gui.md): separate local web control panel and result viewer.
 - [Configuration](docs/configuration.md): JSON keys, defaults, and supported values.
 - [Testing](tests/README.md): C++ and Python test layout and commands.
 - [Development](docs/development.md): contributor workflow and repository conventions.

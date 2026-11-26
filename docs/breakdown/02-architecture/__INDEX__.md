@@ -14,4 +14,5 @@ summary: How the system is organized — boundaries, containers, components, dat
 - **INFO-012** [Component view](component-view.md) — Internal module decomposition of libssp4sim, graph responsibility split, and the execution pipeline
 - **INFO-013** [Data flow](data-flow.md) — Primary runtime data flows from configuration through execution to recording
 - **INFO-014** [Quality attributes](quality-attributes.md) — Non-functional characteristics that shape architecture and design decisions
+- **INFO-044** [GUI frontend view](gui-frontend-view.md) — Boundary, components, and protocols of the separate ssp4sim-gui frontend consuming the daemon and result artifacts
 <!-- pb:index:end -->

@@ -22,6 +22,8 @@ from here.
   [`docs/breakdown/README.md`](docs/breakdown/README.md), managed with the
   product-breakdown skill (`pb check`, `pb node-size`, `pb registers`, `pb archive`)
 - Running the CLI and Python API: [`docs/usage.md`](docs/usage.md)
+- Separate local web GUI (control daemon + result files):
+  [`docs/gui.md`](docs/gui.md)
 - Local build commands: [`docs/build_from_source.md`](docs/build_from_source.md)
 - Development workflows, repository layout, coding style, dependencies, generated
   data, and contribution conventions: [`docs/development.md`](docs/development.md)
@@ -56,6 +58,9 @@ ctest --test-dir build --output-on-failure -j   # canonical C++ test runner
 tests/run_unit.sh --tier T1                     # focused unit tier (T1/T2/T3)
 pip install -e ./build/src/public/python_api        # Python API; never pip install the repo root
 pytest -q tests/python
+pip install -e src/public/ssp4sim_gui               # separate GUI package (not CMake)
+ssp4sim-gui --offline --results-dir ./wd            # GUI without a daemon
+pytest -q tests/python/gui                          # readers/backends/API/static
 ```
 
 There is no Python lint or format gate: the repository has no `ruff.toml` and

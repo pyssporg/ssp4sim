@@ -184,6 +184,11 @@ The Python tests import `pyssp4sim` from `build/src/public/python_api` when that
 build artifact exists. This prevents high-level tests from accidentally passing
 against an unrelated installed wheel.
 
+`tests/python/gui/` covers the standalone GUI package: CSV/SQLite readers,
+daemon and offline control backends, static assets, and the HTTP API. Those
+tests import the package from `src/public/ssp4sim_gui`; the API tests skip when
+FastAPI/HTTPX are absent. See [GUI](../docs/gui.md).
+
 A separate smoke test exercises the packaged CLI through `venv/bin/pyssp4sim`
 against the local `resources/embrace/embrace.json` fixture with temporary
 output paths.

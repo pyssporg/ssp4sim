@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ssp4sim-gui"
+version = "0.1.0"
+description = "Local web GUI for ssp4sim daemon control and result-artifact visualisation"
+requires-python = ">=3.9"
+dependencies = [
+  "fastapi>=0.110,<1",
+  "uvicorn>=0.29,<1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "httpx"]
+
+[project.scripts]
+ssp4sim-gui = "ssp4sim_gui.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["ssp4sim_gui*"]
+
+[tool.setuptools.package-data]
+ssp4sim_gui = ["static/*"]

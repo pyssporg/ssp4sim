@@ -21,7 +21,7 @@ status: current
   - Linux x86_64 as primary platform
 - **Out of scope** (boundaries canonical in `CON-001`):
   - FMI 2.0 model exchange
-  - GUI, dashboard, or web interface
+  - GUI, dashboard, or web interface built into the engine; the separate `ssp4sim-gui` frontend is in the product family but is not part of `libssp4sim`
   - Windows or macOS platform support
   - SSP 2.0 support
   - Real-time simulation guarantees

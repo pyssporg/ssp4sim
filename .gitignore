@@ -1,4 +1,6 @@
 
+tmp/
+
 .opencode/
 .dynamic-harness/
 harness.json
@@ -153,6 +155,7 @@ celerybeat.pid
 # Environments
 .env
 .venv
+.venv-gui/
 env/
 venv/
 ENV/
