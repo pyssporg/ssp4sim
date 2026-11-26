@@ -14,10 +14,8 @@ namespace ssp4sim::graph
     GeometricSubstepExecutor::GeometricSubstepExecutor(
         std::vector<std::shared_ptr<Invocable>> nodes,
         double factor,
-        std::uint64_t threshold,
-        const bool realtime)
-        : ExecutorBase(std::move(nodes), "ssp4sim.execution.GeometricSubstepExecutor",
-                       realtime),
+        std::uint64_t threshold)
+        : ExecutorBase(std::move(nodes), "ssp4sim.execution.GeometricSubstepExecutor"),
           factor(factor),
           threshold(threshold)
     {
@@ -116,8 +114,8 @@ namespace ssp4sim::graph
                  step_data.start_time, step_data.end_time,
                  factor, threshold))
         {
-            wait_for_realtime_sync(sub_start);
-            invoke_group_parallel(nodes, StepData(sub_start, sub_end));
+            auto s = StepData(sub_start, sub_end);
+            invoke_group_parallel(nodes, s);
         }
         return step_data.end_time;
     }

@@ -1,11 +1,19 @@
 classDiagram
 
 class Simulator {
-    Coordinates loading of SSP archives and drives the simulation lifecycle.
+    Public compatibility facade over ThreadedRunner: owns setup, control, and query access; start() blocks until running or terminal.
 }
 
-class Simulation {
-    Owns runtime components required to execute a simulation step-by-step.
+class ThreadedRunner {
+    Owns the only async layer: worker thread, command queue, pacing, RunState including Stopping, start barrier, wait, and terminal result. Drives SimulationStepper and RunControl.
+}
+
+class SimulationStepper {
+    Synchronous core: owns SSP import, graph, executors, recorder, simulation time, and one macro step; no thread, pacing, RunState, or command queue.
+}
+
+class RunControl {
+    Single owner of the run-control state machine: one mutex guards the plain state, time, speed, and pacing fields, and one ordered command queue.
 }
 
 class FmuHandler {
@@ -69,13 +77,14 @@ class SignalStorage {
     Allocates contiguous memory areas and metadata for stored signals.
 }
 
-Simulator *-- Simulation
-
-Simulation *-- FmuHandler
-Simulation *-- DataRecorder
-Simulation *-- Graph
-Simulation *--  GraphBuilder
-Simulation *--  AnalysisGraphBuilder
+Simulator *-- ThreadedRunner
+ThreadedRunner *-- RunControl
+ThreadedRunner *-- SimulationStepper
+SimulationStepper *-- FmuHandler
+SimulationStepper *-- DataRecorder
+SimulationStepper *-- Graph
+SimulationStepper *--  GraphBuilder
+SimulationStepper *--  AnalysisGraphBuilder
 AnalysisGraph --> GraphBuilder
 
 FmuHandler *-- "many" FmuInfo

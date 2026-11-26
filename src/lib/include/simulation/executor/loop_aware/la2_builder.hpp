@@ -15,12 +15,12 @@ namespace ssp4sim::graph
     /// component-DAG condensation, the outer SerialSeidel over the condensed
     /// graph, and the stack-wide read-path resolver — which is *also derived
     /// and installed here*, not inside an executor constructor. The returned
-    /// executor is the outer Gauss-Seidel walk; ExecutorBuilder wraps it in a
-    /// MacroExecutor.
+    /// executor is the outer Gauss-Seidel walk; ExecutorBuilder returns it
+    /// directly.
     ///
     /// `options.parallel` requests ParallelSeidel as the outer executor; its
     /// invoke() is still stubbed, so this throws instead of failing at the
-    /// first macro step. Remove the guard once ParallelSeidel::invoke lands.
+    /// first slice. Remove the guard once ParallelSeidel::invoke lands.
     ///
     /// `options` is the `ssp4sim::La2Options` nested inside
     /// `ssp4sim::ExecutorOptions` (parsed centrally by SharedConfig) — passed

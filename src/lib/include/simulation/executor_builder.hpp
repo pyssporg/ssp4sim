@@ -39,12 +39,10 @@ namespace ssp4sim::graph
 
         ssp4cpp::utils::log::Logger* log = nullptr;
 
-        // `options` is parsed once by `ssp4sim::ExecutorOptions::load()` (see
-        // shared_config.hpp). `macro_step` (ns) is the outer macro-step size,
-        // owned by `ssp4sim::FmuModelConfig` (SharedConfig::fmu.timestep) — the
-        // single source of truth for the configured timestep.
-        ExecutorBuilder(const ssp4sim::ExecutorOptions &options,
-                        uint64_t macro_step);
+        // `options` is parsed once by `ssp4sim::ExecutorOptions::from_json()`
+        // (see shared_config.hpp). The builder is a pure executor factory: the
+        // engine owns the outer time-step loop and RunControl pacing.
+        ExecutorBuilder(const ssp4sim::ExecutorOptions &options);
 
         std::string to_string() const override;
 
@@ -52,7 +50,6 @@ namespace ssp4sim::graph
 
     private:
         ssp4sim::ExecutorOptions options_;
-        uint64_t macro_step_ = 0;
 
         // Every concrete executor (family + mode) registers as one leaf
         // variant; build() picks the single matching variant from the config

@@ -29,7 +29,6 @@ def write_signal_sine_gain_add_spike_config(ssp_root: Path, workdir: Path) -> Pa
     simulation["stop_time"] = 1.0
     simulation["timestep"] = 0.001
     simulation["tolerance"] = 1e-4
-    simulation["realtime"] = False
     simulation["working_dir"] = str(workdir)
 
     executor = simulation["executor"]

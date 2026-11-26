@@ -4,12 +4,15 @@
 
 This document describes how `ssp4sim` builds and consumes the input JSON configuration file passed to `sim_app` (or `Simulator(config_path)`).
 
-For CLI and Python invocation examples, see [Usage](usage.md).
+For CLI and Python invocation examples, see [Usage](usage.md). The `ssp4simd`
+daemon consumes the same JSON file; its `--config` and `--socket` flags are
+documented in [Control Daemon](usage.md#control-daemon). `simulation.speed` is
+the startup pace and can be changed at runtime with `set_speed()`.
 
 ## How Configuration Is Built Up
 
 1. The application takes one argument: a path to a JSON config file.
-2. `Config::loadFromFile()` reads that file and parses JSON (comments are allowed).
+2. `SharedConfig::from_file()` reads that file and parses JSON (comments are allowed).
 3. Runtime code reads values using dotted keys, for example:
    - `simulation.ssp`
    - `simulation.executor.method`
@@ -33,7 +36,7 @@ For CLI and Python invocation examples, see [Usage](usage.md).
     "stop_time": 10.0,
     "timestep": 0.1,
     "tolerance": 1e-4,
-    "realtime": false,
+    "speed": 0.0,
     "working_dir": "./wd/embrace",
     "executor": {
       "method": "jacobi",
@@ -76,7 +79,7 @@ For CLI and Python invocation examples, see [Usage](usage.md).
 | `simulation.stop_time` | `double` | Yes | - | Seconds. |
 | `simulation.timestep` | `double` | Yes | - | Seconds. |
 | `simulation.tolerance` | `double` | Yes | - | FMU experiment tolerance. |
-| `simulation.realtime` | `bool` | No | `false` | Sync simulation progress to the computer clock. |
+| `simulation.speed` | `double` | No | `0.0` | Wall-clock pace for the outer macro steps: `0` runs as fast as possible; a value `> 0` advances simulation time `speed` times faster than wall time (`1` = realtime). Must be finite and `>= 0`. Timing only; simulation results do not change. |
 | `simulation.working_dir` | `string` | No | `./wd/default` | Base directory for default recorder and log output paths. |
 
 ### `simulation.executor.*`
@@ -98,20 +101,19 @@ For CLI and Python invocation examples, see [Usage](usage.md).
 
 Notes:
 - All `simulation.executor.*` keys are parsed exactly once, centrally, by
-  `ssp4sim::ExecutorOptions::load()` (called from the `SharedConfig`
-  constructor in `src/lib/public_include/shared_config.hpp`); `simulation.realtime`
-  (paces the outer `MacroExecutor` macro steps), `simulation.tolerance`,
+  `ssp4sim::ExecutorOptions::from_json()` (called from `SharedConfig::load` in
+  `src/lib/public_include/shared_config.cpp`); `simulation.tolerance`,
   `simulation.executor.forward_derivatives`, `simulation.log.fmu` and the
   experiment times (`simulation.start_time` / `simulation.timestep` /
   `simulation.stop_time`, owned by `ssp4sim::FmuModelConfig`) are parsed in the
-  same `SharedConfig` constructor. Options are nested and passed through
+  same `SharedConfig::load`. Options are nested and passed through
   directly: `SharedConfig::executor.la2` is forwarded unchanged to the
   config-free `make_la2_stack(nodes, La2Options)` factory
   (`executor/loop_aware/la2_builder.hpp`) for the `la2` (and legacy
   `loop_aware`) method, and `SharedConfig::fmu` is forwarded unchanged to the
   model layer via `GraphBuilder`. Executors and models are constructed from
-  these typed values (constructor injection) and never read the global
-  `utils::Config`; `ExecutorBuilder` resolves the single matching registered
+  these typed values (constructor injection) and never parse configuration
+  themselves; `ExecutorBuilder` resolves the single matching registered
   variant from the whole config set (`options.method` plus the per-family
   flags) — no per-family branching.
 - Unknown `simulation.executor.method` throws runtime error.

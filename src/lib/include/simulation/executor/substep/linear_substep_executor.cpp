@@ -11,10 +11,8 @@ namespace ssp4sim::graph
 {
 
     LinearSubstepExecutor::LinearSubstepExecutor(
-        std::vector<std::shared_ptr<Invocable>> nodes, std::size_t iterations,
-        const bool realtime)
-        : ExecutorBase(std::move(nodes), "ssp4sim.execution.LinearSubstepExecutor",
-                       realtime),
+        std::vector<std::shared_ptr<Invocable>> nodes, std::size_t iterations)
+        : ExecutorBase(std::move(nodes), "ssp4sim.execution.LinearSubstepExecutor"),
           iterations(iterations)
     {
         this->name = "LinearSubstepExecutor";
@@ -44,8 +42,8 @@ namespace ssp4sim::graph
             // distribute the remainders across the iterations
             const auto end = start + base_sub_dt + (i < remainder);
 
-            wait_for_realtime_sync(start);
-            invoke_group_parallel(nodes, StepData(start, end));
+            auto s = StepData(start, end);
+            invoke_group_parallel(nodes, s);
 
             start = end;
         }

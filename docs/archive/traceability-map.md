@@ -27,6 +27,7 @@ the leaf is the source of truth; the record is how the state got there.
 - **AD-004** — State: `02-architecture/component-view.md` (Component view) · Artifacts: `lib/include/pre`, `lib/include/simulation`
 - **AD-005** — State: `02-architecture/component-view.md` (Component view) · Artifacts: `lib/include/pre`, `lib/include/simulation`
 - **AD-006** — State: `02-architecture/component-view.md` (Component view) · Artifacts: `lib/include/pre`, `lib/include/simulation`, `tests/lib/analysis`
+- **AD-007** — State: `03-implementation/interfaces.md` (Interfaces) · Artifacts: `docs/usage.md`, `docs/configuration.md`, `docs/build_from_source.md`
 
 ### Implementation
 

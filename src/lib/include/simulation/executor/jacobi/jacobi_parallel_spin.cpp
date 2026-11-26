@@ -16,7 +16,7 @@ namespace ssp4sim::graph
             LOG_DEBUG(log, "[{func}] stepdata: {stepdata}", __func__, step_data.to_string());
         });
 
-        auto step = StepData(step_data.start_time, step_data.end_time);
+        auto step = step_data;
 
         pool.ready(static_cast<int>(nodes.size()));
 

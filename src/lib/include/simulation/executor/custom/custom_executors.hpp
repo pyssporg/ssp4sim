@@ -128,7 +128,7 @@ namespace ssp4sim::graph
         // hot path
         uint64_t invoke(StepData step_data) override final
         {
-            auto step = StepData(step_data.start_time, step_data.end_time);
+            auto step = step_data;
 
             IF_LOG({
                 LOG_DEBUG(log, "[{func}] {name} stepdata: {stepdata}", __func__, name, step_data.to_string());
@@ -187,8 +187,6 @@ namespace ssp4sim::graph
         // hot path
         uint64_t invoke(StepData step_data) override final
         {
-            auto step = StepData(step_data.start_time, step_data.end_time);
-
             IF_LOG({
                 LOG_DEBUG(log, "[{func}] {name} stepdata: {stepdata}", __func__, name, step_data.to_string());
             });
@@ -197,7 +195,7 @@ namespace ssp4sim::graph
             auto substep_size = step_data.timestep;
 
             auto s1 = StepData(step_data.start_time, step_data.start_time + 2 * one_ms);
-            
+
             gauss_seidel(g1, s1, substep_size);
             gauss_seidel(g2, s1, substep_size);
             gauss_seidel(g3, s1, substep_size);

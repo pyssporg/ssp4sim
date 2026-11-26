@@ -1,6 +1,5 @@
 #include "signal/storage.hpp"
 
-#include <cstring>
 #include <memory>
 #include <new>
 #include <sstream>

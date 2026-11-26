@@ -13,12 +13,10 @@ using namespace ssp4sim::utils;
 namespace fs = std::filesystem;
 
 // ---------------------------------------------------------------------------
-// Description: Comprehensive config system tests covering file loading,
-//              missing/malformed files, required values, defaults, type
-//              mismatches, path resolution, and recording config parsing
-// Rationale:   Config is the primary user-facing interface for simulation setup
-// Creep flag:  Single TEST_CASE with 11 SECTIONS sharing mutable global state
-//              (Config::loadFromFile). Section ordering matters — fragile.
+// Description: Config value-type tests covering file loading, missing/malformed
+//              files, required values, defaults, type mismatches, path
+//              resolution, and recording config parsing.
+// Rationale:   Config is the primary user-facing interface for simulation setup.
 // ---------------------------------------------------------------------------
 TEST_CASE("Config tests", "[config]")
 {
@@ -28,69 +26,74 @@ TEST_CASE("Config tests", "[config]")
 
     SECTION("Load from file")
     {
-        REQUIRE_NOTHROW(Config::loadFromFile(config_file));
+        REQUIRE_NOTHROW(Config::fromFile(config_file));
     }
 
     SECTION("Load from non-existent file")
     {
-        REQUIRE_THROWS(Config::loadFromFile("non_existent_file.json"));
+        REQUIRE_THROWS(Config::fromFile("non_existent_file.json"));
     }
 
     SECTION("Load from malformed file")
     {
-        REQUIRE_THROWS(Config::loadFromFile(malformed_config_file));
+        REQUIRE_THROWS(Config::fromFile(malformed_config_file));
     }
-
-    // Load the config for the following tests
-    Config::loadFromFile(config_file);
 
     SECTION("Get required value")
     {
-        REQUIRE(Config::getString("name") == "test");
-        REQUIRE(Config::getInt("value") == 123);
-        REQUIRE(Config::getString("nested.key") == "value");
-        REQUIRE(Config::getString("array.0") == "a");
+        const auto cfg = Config::fromFile(config_file);
+        REQUIRE(cfg.getString("name") == "test");
+        REQUIRE(cfg.getInt("value") == 123);
+        REQUIRE(cfg.getString("nested.key") == "value");
+        REQUIRE(cfg.getString("array.0") == "a");
     }
 
     SECTION("Get required value that does not exist")
     {
-        REQUIRE_THROWS(Config::getString("non_existent_key"));
+        const auto cfg = Config::fromFile(config_file);
+        REQUIRE_THROWS(cfg.getString("non_existent_key"));
     }
 
     SECTION("Get required value with type mismatch")
     {
-        REQUIRE_THROWS(Config::getInt("name"));
+        const auto cfg = Config::fromFile(config_file);
+        REQUIRE_THROWS(cfg.getInt("name"));
     }
 
     SECTION("Get with default value")
     {
-        REQUIRE(Config::getOr("name", std::string("default")) == "test");
-        REQUIRE(Config::getOr("value", 456) == 123);
-        REQUIRE(Config::getOr("nested.key", std::string("default")) == "value");
-        REQUIRE(Config::getOr("array.0", std::string("default")) == "a");
+        const auto cfg = Config::fromFile(config_file);
+        REQUIRE(cfg.getOr("name", std::string("default")) == "test");
+        REQUIRE(cfg.getOr("value", 456) == 123);
+        REQUIRE(cfg.getOr("nested.key", std::string("default")) == "value");
+        REQUIRE(cfg.getOr("array.0", std::string("default")) == "a");
     }
 
     SECTION("Get with default value that does not exist")
     {
-        REQUIRE(Config::getOr("non_existent_key", std::string("default")) == "default");
+        const auto cfg = Config::fromFile(config_file);
+        REQUIRE(cfg.getOr("non_existent_key", std::string("default")) == "default");
     }
 
     SECTION("Get with default value with type mismatch")
     {
-        REQUIRE_THROWS(Config::getOr("name", 456));
+        const auto cfg = Config::fromFile(config_file);
+        REQUIRE_THROWS(cfg.getOr("name", 456));
     }
 
     SECTION("Resolve path")
     {
-        REQUIRE(Config::resolvePath("name") != nullptr);
-        REQUIRE(Config::resolvePath("nested.key") != nullptr);
-        REQUIRE(Config::resolvePath("array.0") != nullptr);
-        REQUIRE(Config::resolvePath("non_existent_key") == nullptr);
+        const auto cfg = Config::fromFile(config_file);
+        REQUIRE(cfg.resolvePath("name") != nullptr);
+        REQUIRE(cfg.resolvePath("nested.key") != nullptr);
+        REQUIRE(cfg.resolvePath("array.0") != nullptr);
+        REQUIRE(cfg.resolvePath("non_existent_key") == nullptr);
     }
 
     SECTION("Recording config is parsed")
     {
-        Config::loadFromString(R"json({
+        auto *log = ssp4cpp::utils::log::simple_logger();
+        const auto shared_config = ssp4sim::SharedConfig::from_string(R"json({
             "simulation": {
                 "ssp": "./fake.ssp",
                 "working_dir": "./wd/test",
@@ -105,10 +108,7 @@ TEST_CASE("Config tests", "[config]")
                     }
                 }
             }
-        })json");
-
-        auto *log = ssp4cpp::utils::log::simple_logger();
-        ssp4sim::SharedConfig shared_config(log);
+        })json", log);
 
         REQUIRE(shared_config.enable_recording);
         REQUIRE(shared_config.csv.enable);
@@ -118,7 +118,8 @@ TEST_CASE("Config tests", "[config]")
 
     SECTION("Recording config can be disabled")
     {
-        Config::loadFromString(R"json(
+        auto *log = ssp4cpp::utils::log::simple_logger();
+        const auto shared_config = ssp4sim::SharedConfig::from_string(R"json(
         {
             "simulation": {
                 "ssp": "./fake.ssp",
@@ -133,10 +134,7 @@ TEST_CASE("Config tests", "[config]")
                 }
             }
         }
-        )json");
-
-        auto *log = ssp4cpp::utils::log::simple_logger();
-        ssp4sim::SharedConfig shared_config(log);
+        )json", log);
 
         REQUIRE_FALSE(shared_config.enable_recording);
         REQUIRE_FALSE(shared_config.csv.enable);

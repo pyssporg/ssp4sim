@@ -1,5 +1,5 @@
 // Scheduling-behavior tests for the la2 stack assembled by ExecutorBuilder:
-//  - acyclic SCCs (bare models) run once per macro step; only loop SCCs are
+//  - acyclic SCCs (bare models) run once per slice; only loop SCCs are
 //    sub-stepped;
 //  - the outer Gauss-Seidel walk respects the condensed component order;
 //  - the ParallelSeidel seam fails loudly while the stub is in place.
@@ -12,7 +12,6 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include "executor/substep/macro_substep_executor.hpp"
 #include "executor/seidel/seidel_serial.hpp"
 #include "executor_builder.hpp"
 #include "shared_config.hpp"
@@ -68,9 +67,8 @@ namespace
         return {std::move(a), std::move(b), std::move(c), std::move(d)};
     }
 
-    // Options for a single macro step over [T0, T1): the macro step equals the
-    // configured timestep (1200 ns == T1), so the outer MacroExecutor performs
-    // exactly one macro step.
+    // Options for a single slice over [T0, T1): the specialized executor is
+    // invoked directly with this span, matching one engine-owned timestep.
     constexpr uint64_t T0 = 0;
     constexpr uint64_t T1 = 1200;
 
@@ -84,20 +82,18 @@ namespace
     }
 } // namespace
 
-TEST_CASE("la2 sub-steps loop SCCs only, acyclic nodes run once per macro step",
+TEST_CASE("la2 sub-steps loop SCCs only, acyclic nodes run once per slice",
           "[la2][scheduling]")
 {
     std::vector<std::string> log;
     auto storage = make_loop_with_tails(&log);
 
-    ssp4sim::graph::ExecutorBuilder builder(la2_options("linear", 2), T1);
+    ssp4sim::graph::ExecutorBuilder builder(la2_options("linear", 2));
     auto executor = builder.build(to_owned(storage));
 
     // Assembly pin: the builder's la2 strategy returns the outer SerialSeidel
     // over the 3 condensed components (A, loop{B,C}, D).
-    auto *macro = dynamic_cast<ssp4sim::graph::MacroExecutor *>(executor.get());
-    REQUIRE(macro != nullptr);
-    auto *outer = dynamic_cast<ssp4sim::graph::SerialSeidel *>(macro->nodes[0].get());
+    auto *outer = dynamic_cast<ssp4sim::graph::SerialSeidel *>(executor.get());
     REQUIRE(outer != nullptr);
     REQUIRE(outer->nodes.size() == 3);
 
@@ -141,6 +137,6 @@ TEST_CASE("la2.parallel fails loudly until ParallelSeidel is implemented",
     std::vector<std::string> log;
     auto storage = make_loop_with_tails(&log);
 
-    ssp4sim::graph::ExecutorBuilder builder(options, T1);
+    ssp4sim::graph::ExecutorBuilder builder(options);
     REQUIRE_THROWS_AS(builder.build(to_owned(storage)), std::runtime_error);
 }

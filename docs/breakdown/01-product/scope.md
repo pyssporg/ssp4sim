@@ -17,6 +17,8 @@ status: current
   - Local database recording output with per-storage tables
   - CSV export output with configurable sample interval
   - C++23 library API, C API, and Python bindings
+  - Runtime control (lifecycle and speed implemented; variable overrides planned/deferred) on the C++, C, and Python embedding surfaces
+  - A local Unix-domain-socket control daemon for external access (override commands planned/deferred)
   - Local logging with terminal, file, JSON, and cutelog tiers
   - Linux x86_64 as primary platform
 - **Out of scope** (boundaries canonical in `CON-001`):

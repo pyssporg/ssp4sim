@@ -24,9 +24,6 @@ namespace ssp4sim::graph
     /// samples the previous sub-step's commitments (deterministic Jacobi-style
     /// relaxation).
     ///
-    /// `realtime` (default false) paces every emitted sub-step to the wall
-    /// clock via ExecutorBase::wait_for_realtime_sync.
-    ///
     /// Resolver-neutral: this executor never installs a read-path resolver.
     /// The executor stack owner installs THE resolver for the whole stack.
     class GeometricSubstepExecutor final : public ExecutorBase
@@ -34,8 +31,7 @@ namespace ssp4sim::graph
     public:
         GeometricSubstepExecutor(std::vector<std::shared_ptr<Invocable>> nodes,
                                  double factor = 0.5,
-                                 std::uint64_t threshold = 0,
-                                 const bool realtime = false);
+                                 std::uint64_t threshold = 0);
 
         // Shrinking sub-steps over [start, end): each covers `factor` of the
         // remaining time; when the remaining time drops at or below

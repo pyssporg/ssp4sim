@@ -2,9 +2,12 @@
 
 #include "utils/time/time.hpp"
 
-#include <nlohmann/json_fwd.hpp>
+#include <nlohmann/json.hpp>
+
+#include <filesystem>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 namespace ssp4sim::utils
 {
@@ -22,33 +25,38 @@ namespace ssp4sim::utils
         using config_error::config_error;
     };
 
+    /// Value type for one parsed JSON config document. No process-global state:
+    /// each instance owns its data, so several configs can coexist.
     class Config
     {
     public:
-        static nlohmann::json data_;
-        // Load (or reload) JSON config from a file path.
-        // Throws std::runtime_error on I/O or parse errors.
-        static void loadFromFile(const std::string &path);
-        static void loadFromString(const std::string &config);
+        Config() = default;
+        explicit Config(nlohmann::json data);
 
-        static void data_available();
+        // Load a JSON config from a file path. Throws std::runtime_error on
+        // I/O or parse errors.
+        static Config fromFile(const std::filesystem::path &path);
+        static Config fromString(std::string_view config);
 
-        static std::string as_string();
+        std::string as_string() const;
 
-        static std::string getString(const std::string &dottedKey);
-        static double getDouble(const std::string &dottedKey);
-        static int getInt(const std::string &dottedKey);
-        static bool getBool(const std::string &dottedKey);
+        std::string getString(const std::string &dottedKey) const;
+        double getDouble(const std::string &dottedKey) const;
+        int getInt(const std::string &dottedKey) const;
+        bool getBool(const std::string &dottedKey) const;
 
-        static std::string getOr(const std::string &dottedKey, std::string_view defaultValue);
-        static std::string getOr(const std::string &dottedKey, const char *defaultValue);
-        static double getOr(const std::string &dottedKey, double defaultValue);
-        static int getOr(const std::string &dottedKey, int defaultValue);
-        static bool getOr(const std::string &dottedKey, bool defaultValue);
+        std::string getOr(const std::string &dottedKey, std::string_view defaultValue) const;
+        std::string getOr(const std::string &dottedKey, const char *defaultValue) const;
+        double getOr(const std::string &dottedKey, double defaultValue) const;
+        int getOr(const std::string &dottedKey, int defaultValue) const;
+        bool getOr(const std::string &dottedKey, bool defaultValue) const;
 
-        static nlohmann::json *resolvePath(const std::string &dottedKey);
+        const nlohmann::json *resolvePath(const std::string &dottedKey) const;
 
         static std::string substitute_tags(std::string text);
+
+    private:
+        nlohmann::json data_{};
     };
 
 }

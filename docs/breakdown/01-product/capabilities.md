@@ -17,5 +17,7 @@ Each capability is a promise from the user's perspective; requirements and use c
 - **CSV Recording:** record simulation results to CSV with configurable sample interval (`REQ-004`).
 - **Local Database Recording:** record results to a local database with per-storage tables; SQLite WAL backend (`REQ-005`).
 - **Multiple API Surface:** CLI, C API, and Python bindings (`REQ-009`).
+- **Runtime Control:** `start` (blocks until running or terminal), pause/resume/stop, wall-clock speed, coherent `RunInfo`/`info` read-back, and state/wait on the C++, C, and Python surfaces (`REQ-016`); `y = k*x + m` variable overrides are planned/deferred and not in current releases.
+- **Local Control Daemon:** `ssp4simd` relays runtime control over a Unix-domain-socket newline-delimited JSON protocol without adding a network listener to the engine (`REQ-017`); override commands are planned/deferred and not in current releases.
 - **Local Logging Tiers:** terminal/file overview, JSON archival, cutelog live navigation, hot-path compile-time disable (`REQ-006`).
 - **Distributed Observability:** export observability to OpenTelemetry for distributed simulation tracing (`REQ-007`).

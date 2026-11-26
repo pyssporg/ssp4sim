@@ -1,21 +1,64 @@
 classDiagram
 
 class Simulator {
-  +ssp: std::unique_ptr<Ssp>
-  +sim: std::unique_ptr<Simulation>
-  +Simulator(ssp_path, props_path)
+  +runner: std::unique_ptr<ThreadedRunner>
+  +Simulator(config)
   +init()
   +simulate()
+  +start()
+  +info() RunInfo
+  +wait()
 }
 
-class Simulation {
-  +ssp: Ssp*
-  +fmu_handler: std::unique_ptr<handler::FmuHandler>
+class ThreadedRunner {
+  +stepper: std::unique_ptr<SimulationStepper>
+  +control: std::shared_ptr<control::RunControl>
+  +run_mutex: std::mutex
+  +run_thread: std::thread
+  +run_future: std::shared_future<RunResult>
+  +run_started: bool
+  +start()
+  +run(): RunResult
+  +info() RunInfo
+}
+
+note for ThreadedRunner "run() owns the outer macro-step loop: calls RunControl::before_slice(), SimulationStepper::step(), RunControl::publish_boundary(), then flushes and finalizes through RunControl::finish()"
+
+class SimulationStepper {
+  +ssp: std::unique_ptr<Ssp>
+  +conf: std::unique_ptr<SharedConfig>
+  +session_uuid: std::string
+  +sim_graph: pre::SimulationGraph
+  +sim: pre::SimulationData
   +recorder: std::unique_ptr<signal::DataRecorder>
-  +sim_graph: std::unique_ptr<graph::Graph>
-  +Simulation(ssp)
+  +simulation_node: std::shared_ptr<graph::Invocable>
   +init()
-  +simulate()
+  +start()
+  +step(): StepStatus
+  +advance_to(target): StepStatus
+  +sim_time_ns() uint64_t
+  +end_time_ns() uint64_t
+  +finish()
+}
+
+class RunControl {
+  +mutex_: std::mutex
+  +cv_: std::condition_variable
+  +deferred_: std::multimap
+  +state_: RunState
+  +sim_time_ns_: uint64_t
+  +speed_: double
+  +before_slice(slice_start_ns) bool
+  +publish_boundary(boundary_ns)
+  +request_stop()
+  +finish(result) RunResult
+  +info() RunInfo
+}
+
+class RunInfo {
+  +state: RunState
+  +sim_time_ns: uint64_t
+  +speed: double
 }
 
 
@@ -147,13 +190,16 @@ class Simulation {
   }
 
 
-Simulator *-- Simulation
-
-Simulation *-- FmuHandler
-Simulation *-- DataRecorder
-Simulation *-- Graph
-Simulation *--  GraphBuilder
-Simulation *--  AnalysisGraphBuilder
+Simulator *-- ThreadedRunner
+ThreadedRunner *-- RunControl
+ThreadedRunner *-- SimulationStepper
+ThreadedRunner ..> RunInfo
+Simulator ..> RunInfo
+SimulationStepper *-- FmuHandler
+SimulationStepper *-- DataRecorder
+SimulationStepper *-- Graph
+SimulationStepper *-- GraphBuilder
+SimulationStepper *--  AnalysisGraphBuilder
 AnalysisGraph --> GraphBuilder
 
 FmuHandler *-- "many" FmuInfo

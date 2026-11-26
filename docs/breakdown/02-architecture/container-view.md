@@ -11,9 +11,10 @@ status: current
 
 Six deployable units, each a separately deployable artifact; one static core linked into every runnable container.
 
-- **libssp4sim:** static library; the core engine linking all module areas; linked into all other containers.
+- **libssp4sim:** static library; the core engine linking all module areas, including runtime control; linked into all other containers.
 - **sim_app:** command-line binary; reads a config file, runs the Simulator lifecycle, reports progress.
 - **pyssp4sim:** Python extension module; Python bindings wrapping libssp4sim.
+- **ssp4simd:** local control daemon; a separate frontend that drives libssp4sim over a Unix-domain-socket NDJSON protocol and adds no network listener to the engine (`INFO-010`).
 - **ssp4sim_tests:** Catch2 test runner; exercises libssp4sim units and integration paths; not deployed.
 - **FMU .so:** vendor-provided FMU implementation, loaded at runtime by the fmi4c adapter; not built by SSP4SIM.
 - **ssp4sim-gui:** standalone Python package; local browser frontend consuming the daemon and result artifacts; not built by CMake and no C++ linkage (`INFO-044`).

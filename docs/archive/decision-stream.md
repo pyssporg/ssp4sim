@@ -43,6 +43,8 @@ Records live in the cold-storage archive; extract one with `pb archive read <ID>
   Formalized three layers: AnalysisSystem (pure data), transient AnalysisGraphFactory (graph views), and the simulation graph.
 - **AD-006** — Pre-Simulation Pipeline — Parsing, Analysis Projection, and Simulation Graph · accepted · 2026-11-11 · `AD-006`
   A staged pre-simulation pipeline hands a resolved connection graph to simulation-graph construction; algebraic-loop detection runs at execution time.
+- **AD-007** — Unix Domain Socket with Newline-Delimited JSON for the Local Control Daemon · accepted · 2026-11-25 · `AD-007`
+  The control daemon is a local frontend that exchanges newline-delimited JSON over an AF_UNIX socket; the engine keeps no network listener.
 
 ### Implementation
 

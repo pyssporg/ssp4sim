@@ -139,7 +139,6 @@ def write_reference_config(ssp_root: Path, workdir: Path) -> Path:
     simulation["stop_time"] = 1.0
     simulation["timestep"] = 0.001
     simulation["tolerance"] = 1e-4
-    simulation["realtime"] = False
     simulation["working_dir"] = str(workdir)
 
     recording = simulation["recording"]

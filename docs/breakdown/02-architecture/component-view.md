@@ -14,7 +14,7 @@ libssp4sim decomposes into eight bounded module areas with fixed responsibilitie
 - **Module areas:**
   - analysis: builds a hierarchical structural view of SSP models, connectors, and connections by recursive traversal; supports FMU components and nested systems.
   - graph: flattens the analysis graph into a flat DAG of invocable FMU nodes; dispatches simulation steps.
-  - execution: executor strategies — Jacobi (4 variants), Seidel (2 variants), custom executors.
+  - execution: executor strategies — Jacobi (4 variants), Seidel (2 variants), custom executors — and the run-control state machine that starts, pauses, resumes, stops, and paces a run.
   - handler: FMU loading, instantiation, stepping, teardown.
   - model: FMU adapter as a graph-invocable model with signal buffers.
   - signal: signal memory layout, recorder handoff, CSV/SQLite sinks.
