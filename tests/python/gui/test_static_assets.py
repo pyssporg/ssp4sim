@@ -241,6 +241,16 @@ def test_state_snapshot_handling_contract() -> None:
     assert "state.sessionId" in text
     assert "!sessionId && Number.isFinite(state.simTime)" in text
     assert "ignoring done for a stale session" in text
+    # A reset retires the old session. A delayed state/snapshot/done response
+    # from it must not rewrite the fresh state or re-mark the run finished.
+    assert "retiredSessions" in text
+    assert "state.retiredSessions.add(state.sessionId)" in text
+    assert "state.retiredSessions.has(sessionId)" in text
+    assert "state.retiredSessions.has(doneSession)" in text
+    apply_state = text[text.index("function applyState(") : text.index("function applyBackendStatus(")]
+    assert apply_state.index("state.retiredSessions.has(sessionId)") < apply_state.index(
+        "state.simState = body.state.toLowerCase()"
+    ), "a stale session must be rejected before it mutates the controls"
     # Auto-open must not steal focus from a run the user already selected.
     assert "state.selectedRunId === null" in text
     assert "function selectSnapshotRun(" in text

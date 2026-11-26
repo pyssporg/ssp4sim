@@ -24,6 +24,7 @@ const state = {
   snapshotHandled: new Set(),
   snapshotClosed: new Set(),
   snapshotErrors: new Set(),
+  retiredSessions: new Set(),
   pathSessions: new Map(),
   finishedRunIds: new Set(),
   offline: false,
@@ -229,6 +230,7 @@ function resetRunData() {
     entry.lastTime = null;
     entry.finished = false;
   }
+  state.finishedRunIds.clear();
   for (const tab of state.tabs) {
     for (const series of tab.series.values()) {
       series.t = [];
@@ -321,6 +323,9 @@ async function applySnapshot(data, options = {}) {
 
   const { sessionId, path } = snapshot;
   const key = `${sessionId}\u0000${path}`;
+  // A reset retires the previous session; a delayed poll or done from it must
+  // never reopen or re-flag the run that the fresh session now owns.
+  if (state.retiredSessions.has(sessionId)) return false;
   if (state.snapshotClosed.has(sessionId)) return false;
 
   const existing = findRunByPath(path);
@@ -399,13 +404,22 @@ function applyState(data) {
     log(`state failure: ${errText(body.error)}`, 'err');
     return;
   }
-  if (typeof body.state === 'string') state.simState = body.state.toLowerCase();
   const sessionId =
     typeof body.session_id === 'string' && body.session_id ? body.session_id : null;
+  if (sessionId && state.retiredSessions.has(sessionId)) {
+    // A reset has already replaced this session. A delayed poll must not
+    // overwrite the fresh state, time, or controls with the old run's.
+    log('ignoring state for a stale session', 'err');
+    return;
+  }
+  if (typeof body.state === 'string') state.simState = body.state.toLowerCase();
   if (sessionId) {
     // A new session is authoritative. Never infer a reset from a small
     // sim_time regression: state polls and time events can arrive out of order.
-    if (state.sessionId && sessionId !== state.sessionId) resetRunData();
+    if (state.sessionId && sessionId !== state.sessionId) {
+      state.retiredSessions.add(state.sessionId);
+      resetRunData();
+    }
     state.sessionId = sessionId;
   }
   if (body.sim_time !== null && body.sim_time !== undefined && Number.isFinite(Number(body.sim_time))) {
@@ -1692,7 +1706,11 @@ async function handleDone(data) {
       : data && data.data && typeof data.data.session_id === 'string'
         ? data.data.session_id
         : null;
-  if (doneSession && state.sessionId && doneSession !== state.sessionId) {
+  if (
+    doneSession &&
+    (state.retiredSessions.has(doneSession) ||
+      (state.sessionId && doneSession !== state.sessionId))
+  ) {
     log('ignoring done for a stale session', 'err');
     return;
   }
@@ -1705,6 +1723,13 @@ async function handleDone(data) {
     log(`final live poll failed: ${errText(err)}`, 'err');
   }
   await refreshValues();
+
+  // The awaits above can cross a reset. Never let an old run's done mark the
+  // fresh run (same artifact path, therefore same run id) as finished.
+  if (doneSession && state.sessionId && doneSession !== state.sessionId) {
+    log('ignoring done for a stale session', 'err');
+    return;
+  }
 
   const ids = runId ? (state.runs.has(runId) ? [runId] : []) : Array.from(state.runs.keys());
   for (const id of ids) {
