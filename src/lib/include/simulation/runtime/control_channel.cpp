@@ -79,7 +79,17 @@ namespace ssp4sim::runtime
     ChannelStatus ControlChannel::status() const
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        return ChannelStatus{state_, sim_time_ns_, speed_, applied_seq_, error_};
+        return ChannelStatus{state_, sim_time_ns_, speed_,
+                             applied_seq_, error_, identity_};
+    }
+
+    void ControlChannel::publish_identity(
+        std::string session_id,
+        std::vector<RecordedArtifact> artifacts)
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        identity_ = std::make_shared<SessionIdentity>(
+            SessionIdentity{std::move(session_id), std::move(artifacts)});
     }
 
     std::size_t ControlChannel::pending() const

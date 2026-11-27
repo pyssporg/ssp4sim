@@ -721,9 +721,9 @@ TEST_CASE("reset discards a live run and rebuilds from the creation config", "[s
 
     ssp4sim::Simulator sim(std::move(config));
     sim.init();
-    const auto first_identity = sim.run_identity();
-    REQUIRE_FALSE(first_identity.session_id.empty());
-    REQUIRE(first_identity.artifacts.empty());
+    const auto first_info = sim.info();
+    REQUIRE_FALSE(first_info.session_id.empty());
+    REQUIRE(first_info.artifacts.empty());
     sim.start();
     REQUIRE(wait_until([&]() { return sim.info().state == RunState::Running; }));
 
@@ -733,10 +733,10 @@ TEST_CASE("reset discards a live run and rebuilds from the creation config", "[s
     REQUIRE(sim.info().sim_time_ns == start_time);
 
     // The rebuilt session publishes its own identity, not the pre-reset copy.
-    const auto second_identity = sim.run_identity();
-    REQUIRE_FALSE(second_identity.session_id.empty());
-    REQUIRE(second_identity.session_id != first_identity.session_id);
-    REQUIRE(second_identity.artifacts.empty());
+    const auto second_info = sim.info();
+    REQUIRE_FALSE(second_info.session_id.empty());
+    REQUIRE(second_info.session_id != first_info.session_id);
+    REQUIRE(second_info.artifacts.empty());
 
     sim.start();
     REQUIRE(sim.wait() == RunResult::Completed);
@@ -790,9 +790,8 @@ TEST_CASE("SimulatorCore advances to an exact time and finishes", "[simulation][
     REQUIRE(stepper.sim_time_ns() == 0);
     REQUIRE(stepper.end_time_ns() == end_time);
 
-    const auto identity = stepper.run_identity();
-    REQUIRE_FALSE(identity.session_id.empty());
-    REQUIRE(identity.artifacts.empty());
+    REQUIRE_FALSE(stepper.session_id().empty());
+    REQUIRE(stepper.artifacts().empty());
 
     stepper.start();
 

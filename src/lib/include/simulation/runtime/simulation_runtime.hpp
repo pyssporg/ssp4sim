@@ -37,10 +37,6 @@ namespace ssp4sim
 
             void init();
 
-            /// Immutable identity of the current session, read from the live
-            /// core. Valid after init().
-            RunIdentity run_identity() const;
-
             /// Spawn the run thread. One run per runtime; a second call
             /// throws. The caller posts the Start action through control().
             void start_thread();

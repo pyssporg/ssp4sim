@@ -251,12 +251,13 @@ namespace ssp4sim
     RunInfo Simulator::info() const
     {
         const ChannelStatus status = p->session->control().status();
-        return RunInfo{status.state, status.sim_time_ns, status.speed};
-    }
-
-    RunIdentity Simulator::run_identity() const
-    {
-        return p->session->run_identity();
+        return RunInfo{status.state,
+                       status.sim_time_ns,
+                       status.speed,
+                       status.identity ? status.identity->session_id
+                                       : std::string{},
+                       status.identity ? status.identity->artifacts
+                                       : std::vector<RecordedArtifact>{}};
     }
 
     bool Simulator::snapshot(const std::filesystem::path &path)

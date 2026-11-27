@@ -212,7 +212,7 @@ and exception mapping are unchanged.
 | Snapshot | `snapshot(path)` → `bool` | `ssp4sim_simulator_snapshot` | `snapshot(path)` (raises on failure) |
 | Restore | `restore(path, start = true)` | `ssp4sim_simulator_restore` | `restore(path, start = true)` |
 | Set speed | `set_speed(double, at_sim_time_ns = nullopt)` | `ssp4sim_simulator_set_speed` | `set_speed(speed, at=None)` |
-| Read coherent state/time/speed | `info()` → `RunInfo` | `ssp4sim_simulator_get_info` → `ssp4sim_run_info` | `info()` → `dict` |
+| Read coherent run info | `info()` → `RunInfo` | `ssp4sim_simulator_get_info` → `ssp4sim_run_info` | `info()` → `dict` |
 | Wait for finish | `wait()` → `RunResult` | `ssp4sim_simulator_wait(handle, &result)` | `wait()` → `str` |
 | One-shot run | `simulate()` | `ssp4sim_simulator_simulate` | `simulate()` |
 
@@ -244,13 +244,17 @@ and `1` run slower. Speed changes only wall-clock pacing, never simulation
 results.
 
 **Read-back.** `info()` is the sole public read-back and returns one coherent
-`RunInfo` with `state`, `sim_time_ns`, and `speed` (C++ `RunInfo`; C
-`ssp4sim_run_info` by value; Python `dict` with `state` as a string,
-`sim_time_ns` as an int, and `speed` as a float). A null C handle returns the
-zero/default record and sets `ssp4sim_last_error()`. `sim_time_ns` is the
-current simulation time in nanoseconds; before the first step it is the
-configured `simulation.start_time`, which can be non-zero. `speed` is the
-current wall-clock pace (`0` = as fast as possible).
+`RunInfo` with `state`, `sim_time_ns`, `speed`, `session_id`, and `artifacts`.
+`session_id` is a stable per-run id, new after `reset`/`restore`; `artifacts`
+lists absolute CSV/SQLite paths with the SQLite `run_id` and is empty before
+`init()` or when recording is off. The C `ssp4sim_run_info` and the Python
+`dict` are projections of `RunInfo` and carry only `state`, `sim_time_ns`, and
+`speed` (Python: `state` as a string, `sim_time_ns` as an int, and `speed` as a
+float). A null C handle returns the zero/default record and sets
+`ssp4sim_last_error()`. `sim_time_ns` is the current simulation time in
+nanoseconds; before the first step it is the configured `simulation.start_time`,
+which can be non-zero. `speed` is the current wall-clock pace (`0` = as fast as
+possible).
 
 **Overrides (planned).** Variable overrides (`set_override`, `clear_override`, `list_overrides`) and `y = k*x + m` behavior are planned/deferred and are not in current releases.
 
@@ -276,7 +280,7 @@ sim.start()  # returns when running or terminal
 sim.pause()
 sim.set_speed(0.5)
 sim.resume()
-print(sim.info())  # coherent state, sim_time_ns, speed
+print(sim.info())  # full RunInfo: state, sim_time_ns, speed, session_id, artifacts
 print(sim.wait())  # "completed" or "stopped"; raises on failure
 ```
 

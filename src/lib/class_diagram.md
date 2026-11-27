@@ -63,6 +63,8 @@ class SimulatorCore {
   +step(): bool
   +advance_to(target): bool
   +sim_time_ns() uint64_t
+  +session_id() std::string
+  +artifacts() std::vector<RecordedArtifact>
   +end_time_ns() uint64_t
   +save_snapshot(path) bool
   +load_snapshot(path)
@@ -139,6 +141,8 @@ class RunInfo {
   +state: RunState
   +sim_time_ns: uint64_t
   +speed: double
+  +session_id: std::string
+  +artifacts: std::vector<RecordedArtifact>
 }
 
 

@@ -77,16 +77,15 @@ namespace ssp4simd
             return result;
         }
 
-        json state_event(const ssp4sim::RunInfo &info,
-                         const ssp4sim::RunIdentity &identity)
+        json state_event(const ssp4sim::RunInfo &info)
         {
             json event{{"v", 1},
                        {"event", "state"},
                        {"state", state_to_string(info.state)},
                        {"sim_time", ns_to_seconds(info.sim_time_ns)},
                        {"speed", info.speed}};
-            event["session_id"] = identity.session_id;
-            event["artifacts"] = artifacts_json(identity.artifacts);
+            event["session_id"] = info.session_id;
+            event["artifacts"] = artifacts_json(info.artifacts);
             return event;
         }
 
@@ -98,15 +97,15 @@ namespace ssp4simd
                         {"speed", info.speed}};
         }
 
-        json done_event(ssp4sim::RunResult result, uint64_t sim_time_ns,
-                        const ssp4sim::RunIdentity &identity)
+        json done_event(ssp4sim::RunResult result,
+                        const ssp4sim::RunInfo &info)
         {
             json event{{"v", 1},
                        {"event", "done"},
                        {"result", result_to_string(result)},
-                       {"sim_time", ns_to_seconds(sim_time_ns)}};
-            event["session_id"] = identity.session_id;
-            event["artifacts"] = artifacts_json(identity.artifacts);
+                       {"sim_time", ns_to_seconds(info.sim_time_ns)}};
+            event["session_id"] = info.session_id;
+            event["artifacts"] = artifacts_json(info.artifacts);
             return event;
         }
 
@@ -216,13 +215,11 @@ namespace ssp4simd
           lifecycle_ready_(other.lifecycle_ready_),
           lifecycle_had_run_(other.lifecycle_had_run_),
           lifecycle_old_info_(other.lifecycle_old_info_),
-          lifecycle_old_identity_(std::move(other.lifecycle_old_identity_)),
           lifecycle_old_error_(std::move(other.lifecycle_old_error_)),
           lifecycle_busy_(other.lifecycle_busy_),
           lifecycle_operation_(other.lifecycle_operation_),
           lifecycle_start_(other.lifecycle_start_),
           lifecycle_cached_info_(other.lifecycle_cached_info_),
-          lifecycle_cached_identity_(std::move(other.lifecycle_cached_identity_)),
           events_(std::move(other.events_)),
           last_time_emit_(other.last_time_emit_),
           last_time_sim_ns_(other.last_time_sim_ns_),
@@ -252,7 +249,6 @@ namespace ssp4simd
             lifecycle_error_.clear();
             lifecycle_had_run_ = false;
             lifecycle_old_info_ = {};
-            lifecycle_old_identity_ = {};
             lifecycle_old_error_.clear();
         }
         lifecycle_busy_ = false;
@@ -424,14 +420,12 @@ namespace ssp4simd
     {
         const auto info =
             lifecycle_busy_ ? lifecycle_cached_info_ : runner_->info();
-        const auto identity = lifecycle_busy_ ? lifecycle_cached_identity_
-                                              : runner_->run_identity();
         json response = make_ok(id);
         response["state"] = state_to_string(info.state);
         response["sim_time"] = ns_to_seconds(info.sim_time_ns);
         response["speed"] = info.speed;
-        response["session_id"] = identity.session_id;
-        response["artifacts"] = artifacts_json(identity.artifacts);
+        response["session_id"] = info.session_id;
+        response["artifacts"] = artifacts_json(info.artifacts);
         return response;
     }
 
@@ -512,7 +506,6 @@ namespace ssp4simd
             lifecycle_error_.clear();
             lifecycle_had_run_ = false;
             lifecycle_old_info_ = {};
-            lifecycle_old_identity_ = {};
             lifecycle_old_error_.clear();
         }
 
@@ -521,7 +514,6 @@ namespace ssp4simd
         // run_ended.
         stop_snapshot_worker();
         lifecycle_cached_info_ = runner_->info();
-        lifecycle_cached_identity_ = runner_->run_identity();
 
         lifecycle_busy_ = true;
         lifecycle_operation_ = operation;
@@ -561,7 +553,6 @@ namespace ssp4simd
         }
 
         const auto old_info = runner_->info();
-        auto old_identity = runner_->run_identity();
 
         bool ok = false;
         std::string message;
@@ -591,7 +582,6 @@ namespace ssp4simd
         lifecycle_error_ = std::move(message);
         lifecycle_had_run_ = had_run;
         lifecycle_old_info_ = old_info;
-        lifecycle_old_identity_ = std::move(old_identity);
         lifecycle_old_error_ = std::move(old_error);
         lifecycle_ready_ = true;
     }
@@ -824,7 +814,6 @@ namespace ssp4simd
             std::string error;
             bool had_run = false;
             ssp4sim::RunInfo old_info{};
-            ssp4sim::RunIdentity old_identity{};
             std::string old_error;
             {
                 std::lock_guard<std::mutex> lock(lifecycle_mutex_);
@@ -836,7 +825,6 @@ namespace ssp4simd
                 error = lifecycle_error_;
                 had_run = lifecycle_had_run_;
                 old_info = lifecycle_old_info_;
-                old_identity = lifecycle_old_identity_;
                 old_error = lifecycle_old_error_;
                 lifecycle_ready_ = false;
                 lifecycle_ok_ = false;
@@ -859,7 +847,7 @@ namespace ssp4simd
             {
                 if (old_info.state != observed_state_)
                 {
-                    emit(state_event(old_info, old_identity));
+                    emit(state_event(old_info));
                 }
                 if (old_info.state == ssp4sim::RunState::Failed &&
                     !old_error.empty())
@@ -867,7 +855,7 @@ namespace ssp4simd
                     emit(error_event("simulation_failed", old_error));
                 }
                 emit(done_event(ssp4sim::terminal_result(old_info.state),
-                                old_info.sim_time_ns, old_identity));
+                                old_info));
             }
 
             // The old terminal must not be reported again by the generic path.
@@ -882,9 +870,8 @@ namespace ssp4simd
             else
             {
                 const auto info = runner_->info();
-                const auto identity = runner_->run_identity();
                 reset_monitor_baseline(info);
-                emit(state_event(info, identity));
+                emit(state_event(info));
 
                 std::string start_error;
                 if (start)
@@ -921,20 +908,18 @@ namespace ssp4simd
                 std::lock_guard<std::mutex> lock(lifecycle_mutex_);
                 lifecycle_had_run_ = false;
                 lifecycle_old_info_ = {};
-                lifecycle_old_identity_ = {};
                 lifecycle_old_error_.clear();
             }
         }
 
         const auto info = runner_->info();
-        const auto identity = runner_->run_identity();
         const auto state = info.state;
         const bool state_changed = state != observed_state_;
 
         if (state_changed)
         {
             observed_state_ = state;
-            emit(state_event(info, identity));
+            emit(state_event(info));
             last_time_emit_ = now;
             last_time_sim_ns_ = info.sim_time_ns;
 
@@ -961,8 +946,7 @@ namespace ssp4simd
                                                      : message));
                 }
 
-                emit(done_event(ssp4sim::terminal_result(state),
-                                info.sim_time_ns, identity));
+                emit(done_event(ssp4sim::terminal_result(state), info));
             }
         }
         else if (state == ssp4sim::RunState::Running ||

@@ -64,12 +64,10 @@ namespace ssp4sim
         void SimulationRuntime::init()
         {
             core_->init();
+            // Publish identity before the state so a client that observes
+            // Initialized can already read it.
+            channel_->publish_identity(core_->session_id(), core_->artifacts());
             channel_->set_state(RunState::Initialized);
-        }
-
-        RunIdentity SimulationRuntime::run_identity() const
-        {
-            return core_->run_identity();
         }
 
         bool SimulationRuntime::started() const

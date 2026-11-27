@@ -50,9 +50,11 @@ namespace ssp4sim
 
         bool initialized() const noexcept;
 
-        /// Immutable identity of this run: stable session id and recorded
-        /// artifacts. Valid after init().
-        RunIdentity run_identity() const;
+        /// Stable session id for this run. Valid after init().
+        const std::string &session_id() const noexcept;
+
+        /// Artifacts this run records, in sink order. Valid after init().
+        const std::vector<RecordedArtifact> &artifacts() const noexcept;
 
         /// Validate the timestep and start the recorder.
         void start();

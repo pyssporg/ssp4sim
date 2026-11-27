@@ -34,9 +34,9 @@ namespace ssp4sim
      * SimulatorCore, the run thread and the outer macro-step loop; the control
      * channel is the barrier between the caller and the loop. Start-up, queries
      * and control are owned directly. info() is the sole public readback of run
-     * state, simulation time and speed. snapshot() is one blocking action on
-     * the control channel; no snapshot service or correlation state lives in
-     * the library.
+     * state, simulation time, speed and identity. snapshot() is one blocking
+     * action on the control channel; no snapshot service or correlation state
+     * lives in the library.
      */
 
 
@@ -105,14 +105,9 @@ namespace ssp4sim
         void set_speed(double speed,
                        std::optional<uint64_t> at_sim_time_ns = std::nullopt);
 
-        /// Sole public readback of run state, simulation time and speed, all
-        /// read together so the three values agree.
+        /// Sole public readback of run state, simulation time, speed, session
+        /// id and artifacts, all read together so the values agree.
         RunInfo info() const;
-
-        /// Immutable identity of the current session: stable session id and
-        /// recorded artifacts. Valid after init(); reflects the rebuilt session
-        /// after reset() or restore().
-        RunIdentity run_identity() const;
 
         /// Blocking snapshot of a Running or Paused run. Returns true when the
         /// file was written, false outside Running/Paused or when the save

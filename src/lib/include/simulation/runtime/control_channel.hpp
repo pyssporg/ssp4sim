@@ -7,10 +7,12 @@
 #include <cstdint>
 #include <exception>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <set>
 #include <string>
+#include <vector>
 
 namespace ssp4sim::runtime
 {
@@ -41,6 +43,13 @@ namespace ssp4sim::runtime
         ActionStatus status = ActionStatus::Pending;
     };
 
+    /// One immutable per-session snapshot; shared by status() copies.
+    struct SessionIdentity
+    {
+        std::string session_id;
+        std::vector<RecordedArtifact> artifacts;
+    };
+
     struct ChannelStatus
     {
         RunState state = RunState::Created;
@@ -48,6 +57,7 @@ namespace ssp4sim::runtime
         double speed = 0.0;
         uint64_t applied_seq = 0;
         std::exception_ptr error;
+        std::shared_ptr<const SessionIdentity> identity; // null before publish
     };
 
     /// Returned by wait_applied so status+error are coherent under one lock.
@@ -77,8 +87,14 @@ namespace ssp4sim::runtime
         /// only awaited actions are recorded.
         AppliedAction post_and_wait(Action action);
 
-        /// Coherent single-lock copy of state, time, speed and last error.
+        /// Coherent single-lock copy of state, time, speed, last error and
+        /// identity.
         ChannelStatus status() const;
+
+        /// Publish the run's stable session id and recorded artifacts. Both
+        /// are copied into every subsequent status() snapshot.
+        void publish_identity(std::string session_id,
+                              std::vector<RecordedArtifact> artifacts);
 
         /// Number of queued actions not yet applied.
         std::size_t pending() const;
@@ -138,6 +154,7 @@ namespace ssp4sim::runtime
         std::set<uint64_t> awaited_;              // posted via post_and_wait
         std::map<uint64_t, DoneAction> done_;     // awaited actions only
         std::exception_ptr error_;
+        std::shared_ptr<const SessionIdentity> identity_;
 
         bool closed_ = false;
     };

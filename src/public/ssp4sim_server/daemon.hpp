@@ -118,7 +118,6 @@ namespace ssp4simd
         bool lifecycle_ready_ = false;
         bool lifecycle_had_run_ = false;
         ssp4sim::RunInfo lifecycle_old_info_{};
-        ssp4sim::RunIdentity lifecycle_old_identity_{};
         std::string lifecycle_old_error_;
 
         // Poll-thread only.
@@ -126,7 +125,6 @@ namespace ssp4simd
         LifecycleOperation lifecycle_operation_ = LifecycleOperation::None;
         bool lifecycle_start_ = false;
         ssp4sim::RunInfo lifecycle_cached_info_{};
-        ssp4sim::RunIdentity lifecycle_cached_identity_{};
 
         std::vector<json> events_;
 

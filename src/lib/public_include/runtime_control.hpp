@@ -48,15 +48,6 @@ namespace ssp4sim
         }
     }
 
-    /// Coherent view of the run-control plane. This is the sole public
-    /// readback of state, simulation time and speed.
-    struct RunInfo
-    {
-        RunState state = RunState::Created;
-        uint64_t sim_time_ns = 0;
-        double speed = 0.0;
-    };
-
     /// One recorded artifact belonging to a run.
     struct RecordedArtifact
     {
@@ -65,10 +56,16 @@ namespace ssp4sim
         int64_t run_id = -1; ///< SQLite internal run id; -1 for CSV
     };
 
-    /// Immutable per-run identity: a stable session id and the artifacts this
-    /// run records, in sink order. Valid after SimulatorCore::init().
-    struct RunIdentity
+    /// Coherent view of the run-control plane. This is the sole public
+    /// readback of state, simulation time, speed, session id and artifacts.
+    /// `session_id` is the stable per-run id and `artifacts` the run's recorded
+    /// files in sink order; both are empty before init() and valid from
+    /// initialization onward.
+    struct RunInfo
     {
+        RunState state = RunState::Created;
+        uint64_t sim_time_ns = 0;
+        double speed = 0.0;
         std::string session_id;
         std::vector<RecordedArtifact> artifacts;
     };
