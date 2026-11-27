@@ -5,7 +5,6 @@
 #include "simulator_core.hpp"
 
 #include <cstdint>
-#include <exception>
 #include <filesystem>
 #include <memory>
 #include <optional>
@@ -15,6 +14,17 @@
 namespace ssp4sim
 {
     struct SimulatorPrivate;
+    class Simulator;
+
+    namespace runtime
+    {
+        struct Action;
+    }
+
+    namespace detail
+    {
+        struct RebuildAccess;
+    }
 
     /**
      * @brief Caller-facing facade for one simulation session.
@@ -116,20 +126,15 @@ namespace ssp4sim
         /// init() is invalid. Throws if construction or initialization fails.
         void reset();
 
-        struct RebuildResult;
-
-        /// Quiesce \p old (stop/join when it had a run), then build a fresh
-        /// simulator from \p config. A null \p snapshot builds an initialized
-        /// simulator (reset); a non-null path builds a restored one (restore,
-        /// carrying the old run's pace and rotating the CSV segment). Never
-        /// throws; failures land in the result.
-        static RebuildResult rebuild(Simulator *old, SharedConfig config,
-                                     const std::filesystem::path *snapshot);
-
         /// Wait for the run to finish; idempotent, rethrows on failure.
         RunResult wait();
 
     private:
+        friend struct detail::RebuildAccess;
+
+        void submit_and_wait(runtime::Action action);
+        std::string shutdown_report() noexcept;
+
         /// Construct, init(), and (for restored) load a snapshot. Used by
         /// rebuild(); no threads or run control are involved.
         static std::unique_ptr<Simulator> create_initialized(SharedConfig config);
@@ -140,15 +145,5 @@ namespace ssp4sim
                                                    double prior_speed);
 
         std::unique_ptr<SimulatorPrivate> p;
-    };
-
-    struct Simulator::RebuildResult
-    {
-        std::unique_ptr<Simulator> replacement;  // null on failure
-        std::exception_ptr exception;             // preserves the original type
-        std::string message;                      // human message (empty on success)
-        RunInfo old_info{};
-        std::string old_run_error;
-        bool had_run = false;
     };
 }

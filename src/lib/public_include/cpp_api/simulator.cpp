@@ -1,9 +1,11 @@
 #include "simulator.hpp"
 
+#include "simulation/runtime/simulator_rebuild.hpp"
 #include "simulation/runtime/simulation_runtime.hpp"
 
 #include "utils/primitives/uuid.hpp"
 
+#include <cmath>
 #include <exception>
 #include <memory>
 #include <stdexcept>
@@ -12,6 +14,12 @@
 
 namespace ssp4sim
 {
+    using runtime::Action;
+    using runtime::ActionKind;
+    using runtime::ActionStatus;
+    using runtime::AppliedAction;
+    using runtime::ChannelStatus;
+
     struct SimulatorPrivate
     {
         explicit SimulatorPrivate(SharedConfig stored)
@@ -41,7 +49,10 @@ namespace ssp4sim
             log);
     }
 
-    Simulator::~Simulator() = default;
+    Simulator::~Simulator()
+    {
+        shutdown();
+    }
 
     void Simulator::init()
     {
@@ -50,7 +61,20 @@ namespace ssp4sim
 
     void Simulator::start()
     {
-        p->session->start();
+        p->session->start_thread();
+
+        Action action;
+        action.kind = ActionKind::Start;
+        const AppliedAction applied =
+            p->session->control().post_and_wait(std::move(action));
+        if (applied.status == ActionStatus::Nok)
+        {
+            if (applied.error)
+            {
+                std::rethrow_exception(applied.error);
+            }
+            throw std::logic_error("Simulator::start() failed");
+        }
     }
 
     RunResult Simulator::wait()
@@ -60,43 +84,192 @@ namespace ssp4sim
 
     void Simulator::simulate()
     {
-        p->session->simulate();
+        start();
+        wait();
+    }
+
+    void Simulator::submit_and_wait(runtime::Action action)
+    {
+        const AppliedAction applied =
+            p->session->control().post_and_wait(std::move(action));
+
+        if (applied.status == ActionStatus::Nok)
+        {
+            if (applied.error)
+            {
+                std::rethrow_exception(applied.error);
+            }
+            throw std::logic_error("Simulator control action was rejected");
+        }
     }
 
     void Simulator::pause(std::optional<uint64_t> at_sim_time_ns)
     {
-        p->session->pause(at_sim_time_ns);
+        if (at_sim_time_ns)
+        {
+            Action action;
+            action.kind = ActionKind::Pause;
+            action.at_ns = *at_sim_time_ns;
+            (void)p->session->control().post(std::move(action));
+            return;
+        }
+
+        if (p->session->control().status().state != RunState::Running)
+        {
+            throw std::logic_error(
+                "Simulator::pause() requires a Running simulation");
+        }
+
+        Action action;
+        action.kind = ActionKind::Pause;
+        submit_and_wait(std::move(action));
     }
 
     void Simulator::resume()
     {
-        p->session->resume();
+        if (p->session->control().status().state != RunState::Paused)
+        {
+            throw std::logic_error(
+                "Simulator::resume() requires a Paused simulation");
+        }
+
+        Action action;
+        action.kind = ActionKind::Resume;
+        submit_and_wait(std::move(action));
     }
 
     void Simulator::stop(std::optional<uint64_t> at_sim_time_ns)
     {
-        p->session->stop(at_sim_time_ns);
+        const RunState state = p->session->control().status().state;
+
+        if (state == RunState::Created || state == RunState::Initialized)
+        {
+            throw std::logic_error(
+                "Simulator::stop() requires a Running or Paused simulation");
+        }
+
+        if (state == RunState::Stopping || is_terminal(state))
+        {
+            return;
+        }
+
+        Action action;
+        action.kind = ActionKind::Stop;
+        if (at_sim_time_ns)
+        {
+            action.at_ns = *at_sim_time_ns;
+            (void)p->session->control().post(std::move(action));
+            return;
+        }
+
+        const AppliedAction applied =
+            p->session->control().post_and_wait(std::move(action));
+        if (applied.status == ActionStatus::Nok &&
+            !p->session->control().is_closed())
+        {
+            if (applied.error)
+            {
+                std::rethrow_exception(applied.error);
+            }
+            throw std::logic_error("Simulator::stop() failed");
+        }
+    }
+
+    std::string Simulator::shutdown_report() noexcept
+    {
+        try
+        {
+            if (!p || !p->session)
+            {
+                return {};
+            }
+
+            if (!p->session->started())
+            {
+                p->session->cancel_before_start();
+                return {};
+            }
+
+            Action action;
+            action.kind = ActionKind::Stop;
+            (void)p->session->control().post(std::move(action));
+            return p->session->join();
+        }
+        catch (...)
+        {
+            return "unknown error";
+        }
     }
 
     void Simulator::shutdown() noexcept
     {
-        (void)p->session->shutdown();
+        (void)shutdown_report();
     }
 
     void Simulator::set_speed(double speed,
                               std::optional<uint64_t> at_sim_time_ns)
     {
-        p->session->set_speed(speed, at_sim_time_ns);
+        if (!std::isfinite(speed) || speed < 0.0)
+        {
+            throw std::invalid_argument(
+                "Simulator::set_speed() requires a finite speed >= 0");
+        }
+
+        if (at_sim_time_ns)
+        {
+            Action action;
+            action.kind = ActionKind::SetSpeed;
+            action.at_ns = *at_sim_time_ns;
+            action.speed = speed;
+            (void)p->session->control().post(std::move(action));
+            return;
+        }
+
+        const RunState state = p->session->control().status().state;
+        if (state != RunState::Initialized && state != RunState::Running &&
+            state != RunState::Paused)
+        {
+            throw std::logic_error(
+                "Simulator::set_speed() requires an Initialized, Running "
+                "or Paused simulation");
+        }
+
+        if (state == RunState::Initialized && !p->session->started())
+        {
+            // No consumer exists before start(); the action is a published
+            // speed update and must not wait on the run thread.
+            p->session->set_speed_before_start(speed);
+            return;
+        }
+
+        Action action;
+        action.kind = ActionKind::SetSpeed;
+        action.speed = speed;
+        submit_and_wait(std::move(action));
     }
 
     RunInfo Simulator::info() const
     {
-        return p->session->info();
+        const ChannelStatus status = p->session->control().status();
+        return RunInfo{status.state, status.sim_time_ns, status.speed};
     }
 
     bool Simulator::snapshot(const std::filesystem::path &path)
     {
-        return p->session->snapshot(path);
+        // No consumer exists before the run starts, and a terminal run cannot
+        // apply the action; reject without posting.
+        const RunState state = p->session->control().status().state;
+        if (state != RunState::Running && state != RunState::Paused)
+        {
+            return false;
+        }
+
+        Action action;
+        action.kind = ActionKind::Snapshot;
+        action.path = path.string();
+        const AppliedAction applied =
+            p->session->control().post_and_wait(std::move(action));
+        return applied.status == ActionStatus::Ok;
     }
 
     void Simulator::restore(const std::filesystem::path &path, bool start)
@@ -105,7 +278,7 @@ namespace ssp4sim
         // configuration this Simulator was created with.
         const SharedConfig original = p->config;
 
-        auto result = Simulator::rebuild(this, p->config, &path);
+        auto result = detail::RebuildAccess::rebuild(this, p->config, &path);
         if (result.exception)
         {
             std::rethrow_exception(result.exception);
@@ -122,7 +295,7 @@ namespace ssp4sim
 
     void Simulator::reset()
     {
-        auto result = Simulator::rebuild(this, p->config, nullptr);
+        auto result = detail::RebuildAccess::rebuild(this, p->config, nullptr);
         if (result.exception)
         {
             std::rethrow_exception(result.exception);
@@ -168,56 +341,5 @@ namespace ssp4sim
         }
 
         return config;
-    }
-
-    Simulator::RebuildResult Simulator::rebuild(
-        Simulator *old,
-        SharedConfig config,
-        const std::filesystem::path *snapshot)
-    {
-        RebuildResult result;
-
-        if (old)
-        {
-            result.old_info = old->info();
-        }
-        result.had_run =
-            old && result.old_info.state != RunState::Created &&
-            result.old_info.state != RunState::Initialized;
-        const double prior_speed = old ? result.old_info.speed : 0.0;
-
-        if (result.had_run)
-        {
-            result.old_run_error = old->p->session->shutdown();
-            result.old_info = old->info();
-        }
-
-        try
-        {
-            if (snapshot)
-            {
-                config =
-                    prepare_restore_config(std::move(config), prior_speed);
-                result.replacement = create_restored(std::move(config), *snapshot);
-            }
-            else
-            {
-                result.replacement = create_initialized(std::move(config));
-            }
-        }
-        catch (const std::exception &exception)
-        {
-            result.exception = std::current_exception();
-            result.message = exception.what();
-            result.replacement.reset();
-        }
-        catch (...)
-        {
-            result.exception = std::current_exception();
-            result.message = "unknown error";
-            result.replacement.reset();
-        }
-
-        return result;
     }
 }

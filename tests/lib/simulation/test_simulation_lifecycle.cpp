@@ -785,12 +785,12 @@ TEST_CASE("SimulatorCore advances to an exact time and finishes", "[simulation][
 
     const uint64_t target_ns = end_time / 2 + end_time / 20;
     REQUIRE(target_ns < end_time);
-    REQUIRE(stepper.advance_to(target_ns) == ssp4sim::StepStatus::Advanced);
+    REQUIRE_FALSE(stepper.advance_to(target_ns));
     REQUIRE(stepper.sim_time_ns() == target_ns);
 
-    REQUIRE(stepper.advance_to(end_time * 2) == ssp4sim::StepStatus::Completed);
+    REQUIRE(stepper.advance_to(end_time * 2));
     REQUIRE(stepper.sim_time_ns() == end_time);
-    REQUIRE(stepper.step() == ssp4sim::StepStatus::Completed);
+    REQUIRE(stepper.step());
 
     REQUIRE_NOTHROW(stepper.finish());
     REQUIRE_NOTHROW(stepper.finish());

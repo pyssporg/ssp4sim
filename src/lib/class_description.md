@@ -1,7 +1,7 @@
 classDiagram
 
 class Simulator {
-    The async runtime: owns the worker thread, command queue, pacing, RunState including Stopping, start barrier, wait, and terminal result. Drives SimulatorCore and RunControl; start() blocks until running or terminal. snapshot() posts one run-thread task and blocks; no snapshot service or correlation state lives here.
+    Caller-facing facade and sole action producer: retains the creation config, posts Start/Pause/Resume/Stop/SetSpeed/Snapshot through SimulationRuntime's ControlChannel, and reads status through it. snapshot() returns bool; restore and reset rebuild through the private factories via the internal detail::RebuildAccess helper.
 }
 
 class SimulatorCore {
@@ -9,11 +9,15 @@ class SimulatorCore {
 }
 
 class SimulationRuntime {
-    Owns the simulation side: the synchronous SimulatorCore, the run thread and future, the outer macro-step loop, and the single RunControl queue/status object; marshals snapshots onto the run thread.
+    Owns the simulation side: the synchronous SimulatorCore, the run thread and future with a separate lifecycle mutex, the outer macro-step loop, and the single ControlChannel queue/status object; it consumes and applies actions and publishes state, and never posts.
 }
 
-class RunControl {
-    Single shared interface between caller and run thread: one mutex and one condition variable guard the lifecycle state, PacingClock (simulation time, speed, pacing anchors, deadline math), and one time-ordered multimap of commands and run work. next_action() is the single loop gate; immediate control mutates state under the same lock, and info() is the status readback.
+class ControlChannel {
+    Single shared object between caller and run thread: one mutex and one condition variable guard RunState, simulation time, speed, the applied sequence, the last error, and one time-ordered multimap of Start/Pause/Resume/Stop/SetSpeed/Snapshot Actions, plus a closed flag. Only the runtime writes RunState; the Simulator is the only producer. post() is fire-and-forget and post_and_wait() blocks for the applied result and is the only path that keeps a completion record.
+}
+
+class PacingClock {
+    Stores speed and wall/simulation anchors and computes pure pacing deadlines; it owns no lock and no simulation time.
 }
 
 class FmuHandler {
@@ -78,7 +82,8 @@ class SignalStorage {
 }
 
 Simulator *-- SimulationRuntime
-SimulationRuntime *-- RunControl
+SimulationRuntime *-- ControlChannel
+SimulationRuntime *-- PacingClock
 SimulationRuntime *-- SimulatorCore
 SimulatorCore *-- FmuHandler
 SimulatorCore *-- DataRecorder

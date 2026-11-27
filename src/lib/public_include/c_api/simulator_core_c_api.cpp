@@ -9,15 +9,6 @@
 #include <memory>
 #include <utility>
 
-// The C enums must stay numerically identical to the canonical C++ enum in
-// cpp_api/simulator_core.hpp; the ABI is a static_cast, not a translation table.
-static_assert(static_cast<int>(ssp4sim::StepStatus::Advanced) ==
-                  SSP4SIM_STEP_ADVANCED,
-              "ssp4sim_step_status drifts from ssp4sim::StepStatus");
-static_assert(static_cast<int>(ssp4sim::StepStatus::Completed) ==
-                  SSP4SIM_STEP_COMPLETED,
-              "ssp4sim_step_status drifts from ssp4sim::StepStatus");
-
 struct ssp4sim_simulator_core_handle
 {
     ssp4sim::SimulatorCore *stepper;
@@ -114,8 +105,8 @@ ssp4sim_status ssp4sim_simulator_core_step(ssp4sim_simulator_core_handle *handle
         "stepping simulation",
         [out_status](ssp4sim::SimulatorCore &stepper)
         {
-            *out_status = static_cast<ssp4sim_step_status>(
-                static_cast<int>(stepper.step()));
+            *out_status = stepper.step() ? SSP4SIM_STEP_COMPLETED
+                                         : SSP4SIM_STEP_ADVANCED;
         });
 }
 
@@ -135,8 +126,9 @@ ssp4sim_status ssp4sim_simulator_core_advance_to(ssp4sim_simulator_core_handle *
         "advancing simulation",
         [target_ns, out_status](ssp4sim::SimulatorCore &stepper)
         {
-            *out_status = static_cast<ssp4sim_step_status>(
-                static_cast<int>(stepper.advance_to(target_ns)));
+            *out_status = stepper.advance_to(target_ns)
+                              ? SSP4SIM_STEP_COMPLETED
+                              : SSP4SIM_STEP_ADVANCED;
         });
 }
 

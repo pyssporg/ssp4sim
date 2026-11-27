@@ -41,7 +41,7 @@ namespace ssp4sim::graph
 
         // `options` is parsed once by `ssp4sim::ExecutorOptions::from_json()`
         // (see shared_config.hpp). The builder is a pure executor factory: the
-        // engine owns the outer time-step loop and RunControl pacing.
+        // runtime owns the outer time-step loop and pacing.
         ExecutorBuilder(const ssp4sim::ExecutorOptions &options);
 
         std::string to_string() const override;

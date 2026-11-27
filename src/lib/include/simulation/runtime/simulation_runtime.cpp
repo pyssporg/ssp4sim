@@ -10,7 +10,6 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
-#include <string_view>
 #include <thread>
 #include <utility>
 
@@ -44,14 +43,15 @@ namespace ssp4sim
 
         SimulationRuntime::~SimulationRuntime()
         {
-            (void)shutdown();
-
             // A live run must be stopped and joined before the core (recorder,
-            // graph and FMUs) is torn down.
+            // graph and FMUs) is torn down. The facade posts Stop; this
+            // defensive path publishes Stopping without posting so the loop
+            // exits even when the runtime is destroyed directly.
             try
             {
                 if (run_thread_.joinable())
                 {
+                    channel_->set_state(RunState::Stopping);
                     run_thread_.join();
                 }
             }
@@ -67,13 +67,18 @@ namespace ssp4sim
             channel_->set_state(RunState::Initialized);
         }
 
-        bool SimulationRuntime::has_run_thread()
+        bool SimulationRuntime::started() const
         {
             std::lock_guard<std::mutex> lock(lifecycle_mutex_);
             return run_started_;
         }
 
-        void SimulationRuntime::start()
+        ControlChannel &SimulationRuntime::control() noexcept
+        {
+            return *channel_;
+        }
+
+        void SimulationRuntime::start_thread()
         {
             if (!core_->initialized())
             {
@@ -100,19 +105,6 @@ namespace ssp4sim
                 run_thread_ = std::move(thread);
                 run_future_ = future;
                 run_started_ = true;
-            }
-
-            Action action;
-            action.kind = ActionKind::Start;
-            const AppliedAction applied =
-                channel_->post_and_wait(std::move(action));
-            if (applied.status == ActionStatus::Nok)
-            {
-                if (applied.error)
-                {
-                    std::rethrow_exception(applied.error);
-                }
-                throw std::logic_error("Simulator::start() failed");
             }
         }
 
@@ -157,197 +149,31 @@ namespace ssp4sim
             return result;
         }
 
-        void SimulationRuntime::simulate()
+        void SimulationRuntime::set_speed_before_start(double speed)
         {
-            start();
-            wait();
+            clock_.apply_speed(speed, core_->sim_time_ns());
+            channel_->set_speed(speed);
         }
 
-        void SimulationRuntime::submit_and_wait(Action action)
+        void SimulationRuntime::cancel_before_start()
         {
-            const AppliedAction applied =
-                channel_->post_and_wait(std::move(action));
-
-            if (applied.status == ActionStatus::Nok)
+            // No consumer exists, so publish the pre-run cancellation directly.
+            if (!is_terminal(channel_->status().state))
             {
-                if (applied.error)
-                {
-                    std::rethrow_exception(applied.error);
-                }
-                throw std::logic_error("Simulator control action was rejected");
+                channel_->set_state(RunState::Stopped);
             }
         }
 
-        void SimulationRuntime::pause(std::optional<uint64_t> at_sim_time_ns)
-        {
-            if (at_sim_time_ns)
-            {
-                Action action;
-                action.kind = ActionKind::Pause;
-                action.at_ns = *at_sim_time_ns;
-                (void)channel_->post(std::move(action));
-                return;
-            }
-
-            if (channel_->status().state != RunState::Running)
-            {
-                throw std::logic_error(
-                    "Simulator::pause() requires a Running simulation");
-            }
-
-            Action action;
-            action.kind = ActionKind::Pause;
-            submit_and_wait(std::move(action));
-        }
-
-        void SimulationRuntime::resume()
-        {
-            if (channel_->status().state != RunState::Paused)
-            {
-                throw std::logic_error(
-                    "Simulator::resume() requires a Paused simulation");
-            }
-
-            Action action;
-            action.kind = ActionKind::Resume;
-            submit_and_wait(std::move(action));
-        }
-
-        void SimulationRuntime::stop(std::optional<uint64_t> at_sim_time_ns)
-        {
-            const RunState state = channel_->status().state;
-
-            if (state == RunState::Created || state == RunState::Initialized)
-            {
-                throw std::logic_error(
-                    "Simulator::stop() requires a Running or Paused simulation");
-            }
-
-            if (state == RunState::Stopping || is_terminal(state))
-            {
-                return;
-            }
-
-            Action action;
-            action.kind = ActionKind::Stop;
-            if (at_sim_time_ns)
-            {
-                action.at_ns = *at_sim_time_ns;
-                (void)channel_->post(std::move(action));
-                return;
-            }
-
-            const AppliedAction applied =
-                channel_->post_and_wait(std::move(action));
-            if (applied.status == ActionStatus::Nok && !channel_->is_closed())
-            {
-                if (applied.error)
-                {
-                    std::rethrow_exception(applied.error);
-                }
-                throw std::logic_error("Simulator::stop() failed");
-            }
-        }
-
-        void SimulationRuntime::set_speed(
-            double speed,
-            std::optional<uint64_t> at_sim_time_ns)
-        {
-            if (!std::isfinite(speed) || speed < 0.0)
-            {
-                throw std::invalid_argument(
-                    "Simulator::set_speed() requires a finite speed >= 0");
-            }
-
-            if (at_sim_time_ns)
-            {
-                Action action;
-                action.kind = ActionKind::SetSpeed;
-                action.at_ns = *at_sim_time_ns;
-                action.speed = speed;
-                (void)channel_->post(std::move(action));
-                return;
-            }
-
-            const RunState state = channel_->status().state;
-            if (state != RunState::Initialized &&
-                state != RunState::Running &&
-                state != RunState::Paused)
-            {
-                throw std::logic_error(
-                    "Simulator::set_speed() requires an Initialized, Running "
-                    "or Paused simulation");
-            }
-
-            if (state == RunState::Initialized && !has_run_thread())
-            {
-                // No consumer exists before start(); the action is a published
-                // speed update and must not wait on the run thread.
-                clock_.apply_speed(speed, core_->sim_time_ns());
-                channel_->set_speed(speed);
-                return;
-            }
-
-            Action action;
-            action.kind = ActionKind::SetSpeed;
-            action.speed = speed;
-            submit_and_wait(std::move(action));
-        }
-
-        RunInfo SimulationRuntime::info() const
-        {
-            const ChannelStatus status = channel_->status();
-            return RunInfo{status.state, status.sim_time_ns, status.speed};
-        }
-
-        bool SimulationRuntime::snapshot(const std::filesystem::path &path)
-        {
-            Action action;
-            action.kind = ActionKind::Snapshot;
-            action.path = path.string();
-            const AppliedAction applied =
-                channel_->post_and_wait(std::move(action));
-            return applied.status == ActionStatus::Ok;
-        }
-
-        std::string SimulationRuntime::shutdown() noexcept
+        std::string SimulationRuntime::join() noexcept
         {
             try
             {
-                if (!has_run_thread())
-                {
-                    // No consumer exists, so publish the pre-run cancellation
-                    // directly.
-                    if (!is_terminal(channel_->status().state))
-                    {
-                        channel_->set_state(RunState::Stopped);
-                    }
-                    return {};
-                }
-
-                if (channel_->is_closed())
-                {
-                    return {};
-                }
-
-                Action action;
-                action.kind = ActionKind::Stop;
-                (void)channel_->post(std::move(action));
-
-                try
-                {
-                    (void)wait();
-                }
-                catch (const std::exception &error)
-                {
-                    return error.what();
-                }
-                catch (...)
-                {
-                    return "unknown error";
-                }
-
+                (void)wait();
                 return {};
+            }
+            catch (const std::exception &error)
+            {
+                return error.what();
             }
             catch (...)
             {
@@ -405,7 +231,10 @@ namespace ssp4sim
                             std::current_exception();
                         channel_->publish_error(error);
                         channel_->set_state(RunState::Failed);
-                        channel_->settle(action.seq, ActionStatus::Nok, error);
+                        // The run reached a terminal state; start() returns and
+                        // wait() rethrows, matching the asynchronous failure
+                        // contract.
+                        channel_->settle(action.seq, ActionStatus::Ok);
                         return false;
                     }
 
@@ -527,14 +356,22 @@ namespace ssp4sim
                     }
                     else
                     {
+                        LOG_ERROR(log_, "Snapshot failed: save returned false");
                         channel_->settle(
                             action.seq, ActionStatus::Nok,
                             std::make_exception_ptr(std::runtime_error(
                                 "snapshot save failed")));
                     }
                 }
+                catch (const std::exception &error)
+                {
+                    LOG_ERROR(log_, "Snapshot failed: {error}", error.what());
+                    channel_->settle(action.seq, ActionStatus::Nok,
+                                    std::current_exception());
+                }
                 catch (...)
                 {
+                    LOG_ERROR(log_, "Snapshot failed: unknown error");
                     channel_->settle(action.seq, ActionStatus::Nok,
                                     std::current_exception());
                 }
@@ -598,10 +435,10 @@ namespace ssp4sim
                             }
                         }
 
-                        const StepStatus step = core_->step();
+                        const bool step = core_->step();
                         channel_->publish_time(core_->sim_time_ns());
 
-                        if (step == StepStatus::Completed)
+                        if (step)
                         {
                             completed = true;
 

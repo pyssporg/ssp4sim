@@ -32,7 +32,6 @@
 namespace fs = std::filesystem;
 using ssp4sim::SharedConfig;
 using ssp4sim::SimulatorCore;
-using ssp4sim::StepStatus;
 
 namespace
 {
@@ -431,7 +430,7 @@ TEST_CASE("snapshot taken mid-run resumes and completes", "[snapshot]")
         SimulatorCore stepper(make_config(ssp_dir, dir.path() / "wd_a"));
         stepper.init();
         stepper.start();
-        REQUIRE(stepper.advance_to(saved_time_ns) == StepStatus::Advanced);
+        REQUIRE_FALSE(stepper.advance_to(saved_time_ns));
         REQUIRE(stepper.sim_time_ns() == saved_time_ns);
         stepper.save_snapshot(snapshot);
     }
@@ -442,12 +441,12 @@ TEST_CASE("snapshot taken mid-run resumes and completes", "[snapshot]")
     REQUIRE(restored.sim_time_ns() == saved_time_ns);
 
     restored.start();
-    StepStatus status = StepStatus::Advanced;
-    for (int i = 0; i < 1000 && status != StepStatus::Completed; ++i)
+    bool completed = false;
+    for (int i = 0; i < 1000 && !completed; ++i)
     {
-        status = restored.step();
+        completed = restored.step();
     }
-    REQUIRE(status == StepStatus::Completed);
+    REQUIRE(completed);
     REQUIRE(restored.sim_time_ns() == restored.end_time_ns());
 }
 
@@ -526,12 +525,12 @@ TEST_CASE("restored run continues within tolerance of uninterrupted run",
     const auto run_to_completion = [](SimulatorCore &stepper)
     {
         stepper.start();
-        StepStatus status = StepStatus::Advanced;
-        for (int i = 0; i < 1000 && status != StepStatus::Completed; ++i)
+        bool completed = false;
+        for (int i = 0; i < 1000 && !completed; ++i)
         {
-            status = stepper.step();
+            completed = stepper.step();
         }
-        REQUIRE(status == StepStatus::Completed);
+        REQUIRE(completed);
         stepper.finish();
     };
 
@@ -549,12 +548,12 @@ TEST_CASE("restored run continues within tolerance of uninterrupted run",
             make_config(ssp_dir, dir.path() / "wd_b1", 1.0, prefix_csv));
         stepper.init();
         stepper.start();
-        StepStatus status = StepStatus::Advanced;
-        for (int i = 0; i < 1000 && status != StepStatus::Completed &&
+        bool completed = false;
+        for (int i = 0; i < 1000 && !completed &&
                         stepper.sim_time_ns() < split_ns;
              ++i)
         {
-            status = stepper.step();
+            completed = stepper.step();
         }
         REQUIRE(stepper.sim_time_ns() == split_ns);
         stepper.save_snapshot(snapshot);
@@ -897,9 +896,9 @@ TEST_CASE("two concurrent Simulator snapshots both succeed",
 
 // ---------------------------------------------------------------------------
 // Snapshot is only legal while the run is live; pre-run and terminal states
-// throw before any run work is posted.
+// return false without posting a run action.
 // ---------------------------------------------------------------------------
-TEST_CASE("Simulator snapshot outside Running or Paused throws",
+TEST_CASE("Simulator snapshot outside Running or Paused returns false",
           "[runner][snapshot]")
 {
     const fs::path ssp_dir = require_dahlquist();
@@ -908,12 +907,10 @@ TEST_CASE("Simulator snapshot outside Running or Paused throws",
     auto config = make_config(ssp_dir, dir.path() / "wd", 1.0);
     ssp4sim::Simulator runner(std::move(config));
 
-    REQUIRE_THROWS_AS(runner.snapshot(dir.path() / "created.snap"),
-                      std::logic_error);
+    REQUIRE_FALSE(runner.snapshot(dir.path() / "created.snap"));
 
     runner.init();
-    REQUIRE_THROWS_AS(runner.snapshot(dir.path() / "initialized.snap"),
-                      std::logic_error);
+    REQUIRE_FALSE(runner.snapshot(dir.path() / "initialized.snap"));
 
     REQUIRE_FALSE(fs::exists(dir.path() / "created.snap"));
     REQUIRE_FALSE(fs::exists(dir.path() / "initialized.snap"));

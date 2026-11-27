@@ -44,6 +44,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Run-control posting now lives in `Simulator`; `SimulationRuntime` only
+  consumes and applies actions. `Simulator::rebuild`/`RebuildResult` moved to
+  the internal `detail::RebuildAccess`, and `SimulatorCore::step`/`advance_to`
+  return `bool` (true = completed). `SnapshotError` remains for load-time error
+  codes.
+- Replaced the split run-control queue (`RunControl`, `RunThreadTask`,
+  `LoopAction`, and snapshot work) with a single `runtime::ControlChannel`:
+  one mutex, one condition variable, one time-ordered `Action` queue, and one
+  published `ChannelStatus`. Immediate control calls block until applied while
+  scheduled calls remain fire-and-forget. `Simulator::snapshot` and
+  `SimulatorCore::save_snapshot` return `bool` and `SnapshotSummary` is gone;
+  the daemon `snapshot` event carries `id?`, `ok`, `code`, `path`, and `bytes`
+  on success or `error` on failure, without `sim_time`, `models_done`, or
+  `models_total`. The C ABI maps a `false` snapshot result to
+  `SSP4SIM_STATUS_RUNTIME_ERROR`; Python raises `RuntimeError`.
 - The `ssp4simd` daemon now drives `ThreadedRunner` directly; `reset` reports
   the old live run's terminal `state` and `done` before the fresh `initialized`
   state, and `shutdown` finalizes its own terminal event.

@@ -11,13 +11,6 @@
 
 namespace ssp4sim
 {
-    /// Outcome of one synchronous macro step.
-    enum class StepStatus
-    {
-        Advanced,
-        Completed,
-    };
-
     /// Failure raised by snapshot save/load. `code` is one of "unsupported",
     /// "io_error", "invalid_snapshot" or "apply_failed".
     struct SnapshotError : std::runtime_error
@@ -59,13 +52,15 @@ namespace ssp4sim
         /// Validate the timestep and start the recorder.
         void start();
 
-        /// Advance one configured macro step. Throws std::logic_error before
-        /// start() or after finish().
-        StepStatus step();
+        /// Advance one configured macro step. Returns true when the run has
+        /// reached the configured end time, false when it advanced normally.
+        /// Throws std::logic_error before start() or after finish().
+        bool step();
 
         /// Advance to an exact simulation time, using a partial final step.
-        /// Clamps the target to end_time and never sleeps.
-        StepStatus advance_to(uint64_t target_ns);
+        /// Clamps the target to end_time and never sleeps. Returns true when the
+        /// run has reached the configured end time.
+        bool advance_to(uint64_t target_ns);
 
         uint64_t sim_time_ns() const noexcept;
         uint64_t end_time_ns() const noexcept;

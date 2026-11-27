@@ -663,8 +663,7 @@ def test_snapshot_and_restore(tmp_path: Path) -> None:
 
             event = instance.wait_event("snapshot", timeout=15.0)
             assert event["ok"], event
-            assert event["models_done"] == event["models_total"], event
-            assert event["models_total"] >= 1, event
+            assert event["bytes"] > 0, event
             assert snapshot_path.exists()
 
             assert instance.response({"v": 1, "id": 102, "cmd": "stop"})["ok"]
@@ -685,10 +684,6 @@ def test_snapshot_and_restore(tmp_path: Path) -> None:
             assert response["ok"] and response["accepted"], response
             lifecycle = instance.wait_lifecycle("restore")
             assert lifecycle["state"] == "running", lifecycle
-            assert lifecycle["sim_time"] >= event["sim_time"], (
-                lifecycle,
-                event,
-            )
 
             resumed = instance.wait_event("state")
             while resumed["state"] != "running":
@@ -742,10 +737,6 @@ def test_restore_start_false_is_async(tmp_path: Path) -> None:
             assert response["ok"] and response["accepted"], response
             lifecycle = instance.wait_lifecycle("restore")
             assert lifecycle["state"] == "initialized", lifecycle
-            assert lifecycle["sim_time"] >= event["sim_time"], (
-                lifecycle,
-                event,
-            )
 
             # The lifecycle event also marks the handoff, so start is accepted
             # again once it arrives.
@@ -1074,8 +1065,7 @@ def test_reset_installs_fresh_runner(tmp_path: Path) -> None:
             )["ok"]
             event = instance.wait_event("snapshot", timeout=15.0)
             assert event["code"] == "ok", event
-            assert event["models_total"] >= 1, event
-            assert event["models_done"] == event["models_total"], event
+            assert event["bytes"] > 0, event
             assert after.exists()
         finally:
             instance.shutdown()

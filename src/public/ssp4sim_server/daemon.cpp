@@ -1,6 +1,7 @@
 #include "daemon.hpp"
 
 #include "runtime_control.hpp"
+#include "simulation/runtime/simulator_rebuild.hpp"
 
 #include <chrono>
 #include <cmath>
@@ -499,7 +500,7 @@ namespace ssp4simd
         const std::filesystem::path *snapshot_path =
             operation == LifecycleOperation::Restore ? &snapshot : nullptr;
 
-        auto result = ssp4sim::Simulator::rebuild(
+        auto result = ssp4sim::detail::RebuildAccess::rebuild(
             runner_.get(), config_, snapshot_path);
 
         std::lock_guard<std::mutex> lock(lifecycle_mutex_);
@@ -574,11 +575,6 @@ namespace ssp4simd
             if (!error)
             {
                 event["bytes"] = bytes;
-            }
-            if (runner_)
-            {
-                event["sim_time"] =
-                    ns_to_seconds(runner_->info().sim_time_ns);
             }
         }
         else
@@ -677,11 +673,11 @@ namespace ssp4simd
             try
             {
                 completion.ok = runner_->snapshot(request.path);
-            }
-            catch (const ssp4sim::SnapshotError &error)
-            {
-                completion.code = error.code;
-                completion.message = error.what();
+                if (!completion.ok)
+                {
+                    completion.code = "snapshot_failed";
+                    completion.message = "snapshot failed";
+                }
             }
             catch (const std::logic_error &error)
             {

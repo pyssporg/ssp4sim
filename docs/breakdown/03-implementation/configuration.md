@@ -18,5 +18,5 @@ One configuration value drives all runtime behavior; the full key table, type de
 - **Daemon:** `ssp4simd` consumes the same JSON file; the daemon adds no config keys and takes its socket path from `--socket` (see `docs/usage.md`).
 - **Substitutions:** every string read replaces `[TIME]` with the current timestamp; `simulation.working_dir` anchors default output locations for recorder and log files.
 - **Process-global limits:** log sinks (console, file, JSON, cutelog) are configured process-wide, so per-instance configs cannot give each simulator its own logging destination; `ssp4cpp::Ssp` is loaded from the filesystem path in `simulation.ssp`, so SSP bytes cannot be supplied in memory.
-- **Lifetime:** a `Simulator` owns its `SimulationRuntime`; the runtime owns `RunControl` and the synchronous `SimulatorCore`; the core owns the `SharedConfig` and loaded `Ssp`; destruction joins a live run before tearing the runtime and core down.
+- **Lifetime:** a `Simulator` owns its `SimulationRuntime`; the runtime owns `ControlChannel`, `PacingClock`, and the synchronous `SimulatorCore`; the core owns the `SharedConfig` and loaded `Ssp`; destruction joins a live run before tearing the runtime and core down.
 - **Schema reference:** full key table, type defaults, and validation behavior are documented in `docs/configuration.md`.

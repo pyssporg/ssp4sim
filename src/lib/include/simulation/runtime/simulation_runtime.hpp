@@ -37,42 +37,36 @@ namespace ssp4sim
 
             void init();
 
-            /// Spawn the run thread, post Start and wait until it is applied.
-            /// One run per runtime; a second call throws.
-            void start();
-
-            /// start() followed by wait().
-            void simulate();
-
-            void pause(std::optional<uint64_t> at_sim_time_ns = std::nullopt);
-            void resume();
-            void stop(std::optional<uint64_t> at_sim_time_ns = std::nullopt);
-            void set_speed(double speed,
-                           std::optional<uint64_t> at_sim_time_ns = std::nullopt);
-
-            RunInfo info() const;
-
-            /// Blocking snapshot of a Running or Paused run. Returns true on
-            /// success, false outside Running/Paused or when the save fails.
-            bool snapshot(const std::filesystem::path &path);
+            /// Spawn the run thread. One run per runtime; a second call
+            /// throws. The caller posts the Start action through control().
+            void start_thread();
 
             /// Wait for the run to finish; idempotent, rethrows on failure.
             RunResult wait();
 
-            /// Unconditional teardown; never throws. Returns the run's failure
-            /// text ("" if none).
-            std::string shutdown() noexcept;
+            /// Join the run and return its failure text ("" if none). The
+            /// caller posts Stop first when a consumer exists.
+            std::string join() noexcept;
 
             /// Restore \p path into this runtime's freshly initialized core and
             /// publish the restored time to the control channel.
             void load_snapshot(const std::filesystem::path &path);
 
+            /// The single shared control state; the runtime retains ownership.
+            ControlChannel &control() noexcept;
+
+            bool started() const;
+
+            /// Publish a speed update when no run thread consumes actions yet.
+            void set_speed_before_start(double speed);
+
+            /// Publish the pre-run cancellation (Stopped unless terminal).
+            void cancel_before_start();
+
         private:
             RunResult run();
             bool apply(Action &action);
-            void submit_and_wait(Action action);
             std::optional<uint64_t> next_pacing_deadline() const;
-            bool has_run_thread();
 
             SharedConfig config_;
             ssp4cpp::utils::log::Logger *log_ = nullptr;
@@ -81,7 +75,7 @@ namespace ssp4sim
             std::unique_ptr<ControlChannel> channel_;
             PacingClock clock_;
 
-            std::mutex lifecycle_mutex_;
+            mutable std::mutex lifecycle_mutex_;
             std::thread run_thread_;
             std::shared_future<RunResult> run_future_;
             bool run_started_ = false;

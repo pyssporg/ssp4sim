@@ -19,7 +19,7 @@ The suite is split by layer so each test has a clear responsibility:
 
 - `tests/lib/core/`: C++ tests for core runtime primitives such as FMU adapter,
   recorder, ring buffer, signal storage, start values, and SQLite recording.
-- `tests/lib/control/`: C++ unit tests for the `RunControl` queue, state machine, and pacing
+- `tests/lib/control/`: C++ unit tests for the `ControlChannel` action queue and pacing
   (`test_run_control`).
 - `tests/lib/utils/`: C++ tests for utility data structures and support code.
 - `tests/lib/high_level/`: C++ smoke tests through the public simulator entry
@@ -248,7 +248,7 @@ root cause.
 
 Runtime control is covered at four levels:
 
-- `tests/lib/control/` exercises the `RunControl` queue/state machine without a full
+- `tests/lib/control/` exercises the `ControlChannel` queue without a full
   simulation, including terminal monotonicity, pre-run teardown, and `RunInfo`
   coherence.
 - `tests/lib/high_level/test_c_api_control.cpp` drives lifecycle, speed,

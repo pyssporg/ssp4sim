@@ -148,7 +148,7 @@ C ABI and the intended core for future FMU/embedded wrappers.
 ssp4sim::SimulatorCore core(std::move(config));
 core.init();
 core.start();
-while (core.step() == ssp4sim::StepStatus::Advanced) {
+while (!core.step()) {
 }
 core.finish();
 ```
@@ -195,6 +195,8 @@ and exception mapping are unchanged.
 | Pause / resume | `pause(at_sim_time_ns = nullopt)` / `resume()` | `ssp4sim_simulator_pause` / `..._resume` | `pause(at=None)` / `resume()` |
 | Stop | `stop(at_sim_time_ns = nullopt)` | `ssp4sim_simulator_stop` | `stop(at=None)` |
 | Reset | `reset()` | `ssp4sim_simulator_reset` | `reset()` |
+| Snapshot | `snapshot(path)` → `bool` | `ssp4sim_simulator_snapshot` | `snapshot(path)` (raises on failure) |
+| Restore | `restore(path, start = true)` | `ssp4sim_simulator_restore` | `restore(path, start = true)` |
 | Set speed | `set_speed(double, at_sim_time_ns = nullopt)` | `ssp4sim_simulator_set_speed` | `set_speed(speed, at=None)` |
 | Read coherent state/time/speed | `info()` → `RunInfo` | `ssp4sim_simulator_get_info` → `ssp4sim_run_info` | `info()` → `dict` |
 | Wait for finish | `wait()` → `RunResult` | `ssp4sim_simulator_wait(handle, &result)` | `wait()` → `str` |
@@ -214,6 +216,13 @@ per-run state, and rebuilds a fresh initialized run from the creation config.
 On success the simulator is `initialized` at the configured start time, so a
 later `init()` is invalid; a subsequent `start()` runs the config from the
 beginning.
+
+**Snapshot.** `snapshot(path)` is blocking and legal only while `running` or
+`paused`: it returns `true` when the checkpoint is written and `false` outside
+those states or when the save fails. The C ABI maps `false` to
+`SSP4SIM_STATUS_RUNTIME_ERROR`; Python raises `RuntimeError`.
+`restore(path, start = true)` is a blocking rebuild that loads a checkpoint into
+a fresh run.
 
 **Speed.** `set_speed()` takes a finite factor `>= 0`: `0` runs as fast as
 possible, `1` is realtime, values above `1` run faster, and values between `0`
@@ -348,7 +357,7 @@ with code `reset_failed` or `restore_failed`.
 | `time` | `sim_time`, `speed` | Progress while running or paused, throttled to about 10 Hz. |
 | `done` | `result`, `sim_time` | Terminal outcome; `result` is `completed`, `stopped`, or `failed`. |
 | `error` | `code`, `message` | A simulation failure, emitted before `done`. |
-| `snapshot` | `id` (the request id, omitted when absent), `ok`, `code`, `path`, `models_done`, `models_total`, and either `sim_time` (seconds) plus `bytes` (total checkpoint file size), or `error` | A snapshot completed or failed (running or paused). `code` is `ok` on success, otherwise `run_ended` or the failure code. |
+| `snapshot` | `id` (the request id, omitted when absent), `ok`, `code`, `path`, and either `bytes` (checkpoint file size) on success or `error` | A snapshot completed or failed (running or paused). `code` is `ok` on success, otherwise `run_ended` or the failure code. |
 | `lifecycle` | `operation` (`reset` or `restore`), `ok`, and either `state` plus `sim_time` (seconds), or `code` plus `error` | A reset or restore finished. On failure `code` is `reset_failed` or `restore_failed` and the previous (stopped) runner is kept. |
 
 `time` events are droppable: a slow client can miss them and may be
@@ -362,7 +371,7 @@ still work but every mutating command (including `snapshot`) returns
 terminal `state` and `done` before the fresh `initialized` state, destroys the
 old runner, and installs a freshly constructed, initialized runner built from
 the original parsed config, so no in-memory simulation state (FMUs, rings,
-resolver frontiers, time, or pending snapshot work) survives. Configured output
+resolver frontiers, time, or pending snapshot requests) survives. Configured output
 destinations are reused rather than deleted: CSV truncates when the new sink
 opens, and an explicitly configured SQLite database is retained with a new run
 id. Completion is reported by a `lifecycle` event with `operation:"reset"`.
@@ -373,8 +382,8 @@ stops and waits for a live run, closes clients, unlinks the socket, and exits.
 `Running` or `Paused` and works identically in both states. The daemon owns an
 async snapshot worker and a request queue, so several requests may be queued;
 each one immediately replies `accepted`. The worker calls the blocking
-`Simulator::snapshot(path)`, which posts one run-thread task on the time-sorted
-queue inside `RunControl`; the run worker consumes it at the next
+`Simulator::snapshot(path)`, which posts one `Snapshot` action through
+`ControlChannel`; the run loop consumes it at the next
 macro-step boundary. Success or failure always arrives as one `snapshot` event
 carrying the request `id` and a `code`. There are no snapshot progress events.
 A checkpoint is a version-4 `SSP4SNAP` container: a checksummed 28-byte header,
@@ -386,8 +395,8 @@ storage is carried inside the model sections with zeroed binary ranges; invalid
 UTF-8 or an embedded NUL is `unsupported`. A save
 writes a `<target>.part-<uuid>` temp sibling, fsyncs the temp file strictly,
 renames it atomically, and attempts a best-effort parent-directory fsync, so a
-partially written file never replaces a good checkpoint. A queued snapshot is
-settled as `run_ended` if the run ends before the next step; to discard a
+partially written file never replaces a good checkpoint. A snapshot request still pending when a reset, restore, or shutdown tears down
+the run is settled as `run_ended`; to discard a
 completed checkpoint, delete the file manually.
 
 When `simulation.snapshot.directory` is set, `snapshot` and `restore` reject a

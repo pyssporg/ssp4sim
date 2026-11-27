@@ -13,43 +13,42 @@ class Simulator {
   +info() RunInfo
   +wait() RunResult
   +shutdown()
-  +snapshot(path) SnapshotSummary
+  +snapshot(path) bool
   +restore(path, start)
   +reset()
-  +rebuild(old, config, snapshot)$ RebuildResult
   +create_initialized(config)$ std::unique_ptr<Simulator>
   +create_restored(config, path)$ std::unique_ptr<Simulator>
+  -submit_and_wait(action)
+  -shutdown_report() std::string
 }
 
-note for Simulator "Simulator is the caller facade: it retains the creation config and delegates init/start/simulate/pause/resume/stop/set_speed/info/snapshot/wait/shutdown to its SimulationRuntime; restore and rebuild construct replacements through the private factories."
+note for Simulator "Simulator is the caller facade and sole action producer: it retains the creation config, posts Start/Pause/Resume/Stop/SetSpeed/Snapshot through its SimulationRuntime's ControlChannel with post/post_and_wait, and reads status through it. The runtime only applies actions and publishes state. restore/reset construct replacements through the private factories via detail::RebuildAccess."
 
 class SimulationRuntime {
   +config: SharedConfig
   +log: Logger*
   +core: std::unique_ptr<SimulatorCore>
-  +control: std::unique_ptr<RunControl>
-  +run_mutex: std::mutex
+  +channel: std::unique_ptr<ControlChannel>
+  +clock: PacingClock
+  +lifecycle_mutex: std::mutex
   +run_thread: std::thread
   +run_future: std::shared_future<RunResult>
   +run_started: bool
   +init()
-  +start()
-  +simulate()
-  +pause(at_sim_time_ns)
-  +resume()
-  +stop(at_sim_time_ns)
-  +set_speed(speed, at_sim_time_ns)
-  +info() RunInfo
-  +snapshot(path) SnapshotSummary
+  +start_thread()
   +wait() RunResult
-  +shutdown() std::string
+  +join() std::string
   +load_snapshot(path)
+  +control() ControlChannel&
+  +started() bool
+  +set_speed_before_start(speed)
+  +cancel_before_start()
+  +apply(action) bool
+  +next_pacing_deadline()
   +run() RunResult
-  +has_run_thread() bool
-  +close_and_cancel_work()
 }
 
-note for SimulationRuntime "SimulationRuntime owns the simulation side: the synchronous core, the run thread/mutex/future, and the outer macro-step loop. RunControl is the single locked queue/status object in the same simulation/runtime/ folder. run() calls RunControl::next_action(), SimulatorCore::step(), RunControl::publish_time(), then flushes and finalizes through RunControl::finish(); every exit path shares one epilogue that closes run work once before the recorder flush. snapshot() posts one private SnapshotWork : RunThreadTask and blocks on its promise; the core owns save/load."
+note for SimulationRuntime "SimulationRuntime owns the synchronous core, the run thread/future guarded by a separate lifecycle mutex, and the outer macro-step loop, and it never posts actions. ControlChannel is the single locked queue/status object: one mutex, one condition variable, one multimap<due_ns, Action> and the published ChannelStatus; only the runtime writes RunState. run() takes a due Action, steps when Running, otherwise waits on the channel condition variable; the epilogue closes the channel, publishes the final time, flushes the recorder, then publishes the terminal state."
 
 class SimulatorCore {
   +ssp: std::unique_ptr<Ssp>
@@ -61,49 +60,66 @@ class SimulatorCore {
   +simulation_node: std::shared_ptr<graph::Invocable>
   +init()
   +start()
-  +step(): StepStatus
-  +advance_to(target): StepStatus
+  +step(): bool
+  +advance_to(target): bool
   +sim_time_ns() uint64_t
   +end_time_ns() uint64_t
-  +save_snapshot(path) SnapshotSummary
+  +save_snapshot(path) bool
   +load_snapshot(path)
   +finish()
 }
 
-class SnapshotSummary {
-  +sim_time_ns: uint64_t
-  +model_count: size_t
-  +file_bytes: size_t
+class Action {
+  +seq: uint64_t
+  +kind: ActionKind
+  +at_ns: uint64_t
+  +speed: double
+  +path: std::string
+  +status: ActionStatus
 }
 
-class RunControl {
+class ChannelStatus {
+  +state: RunState
+  +sim_time_ns: uint64_t
+  +speed: double
+  +applied_seq: uint64_t
+  +error: std::exception_ptr
+}
+
+class ControlChannel {
   +mutex_: std::mutex
   +cv_: std::condition_variable
   +state_: RunState
-  +clock_: PacingClock
-  +events_: std::multimap<uint64_t, Event>
+  +sim_time_ns_: uint64_t
+  +speed_: double
+  +applied_seq_: uint64_t
+  +queue_: std::multimap<uint64_t, Action>
   +closed_: bool
-  +next_action(step_start_ns) LoopAction
-  +post_work(work) bool
-  +pop_work() RunThreadTask
-  +drain_work()
-  +close_events()
-  +pending_events() size_t
-  +publish_time(time_ns)
-  +request_stop()
-  +finish(result) RunResult
-  +info() RunInfo
+  +post(action) uint64_t
+  +post_and_wait(action) AppliedAction
+  +status() ChannelStatus
+  +pending() size_t
+  +take_due(sim_time_ns) optional<Action>
+  +wait_for_work(sim_time_ns, deadline)
+  +publish_time(sim_time_ns)
+  +set_speed(speed)
+  +set_state(state)
+  +publish_error(error)
+  +settle(seq, status, error)
+  +close(error)
+  +wait_terminal() RunState
 }
 
 class PacingClock {
-  +sim_time_ns_: uint64_t
   +speed_: double
   +anchor_wall_ns_: int64_t
   +anchor_sim_ns_: uint64_t
-  +advance_to(time_ns)
-  +apply_speed(speed)
+  +speed() double
+  +anchor_wall_ns() int64_t
+  +anchor_sim_ns() uint64_t
+  +apply_speed(speed, sim_time_ns)
   +anchor_at(sim_time_ns)
-  +compute_deadline_ns() uint64_t
+  +deadline_ns(...)$ uint64_t
 }
 
 class RebuildResult {
@@ -113,6 +129,10 @@ class RebuildResult {
   +old_info: RunInfo
   +old_run_error: std::string
   +had_run: bool
+}
+
+class RebuildAccess {
+  +rebuild(old, config, snapshot)$ RebuildResult
 }
 
 class RunInfo {
@@ -251,13 +271,13 @@ class RunInfo {
 
 
 Simulator *-- SimulationRuntime
-SimulationRuntime *-- RunControl
+SimulationRuntime *-- ControlChannel
+SimulationRuntime *-- PacingClock
 SimulationRuntime *-- SimulatorCore
-Simulator ..> SnapshotSummary
-RunControl *-- PacingClock
-RunControl *-- RunThreadTask
-SimulatorCore ..> SnapshotSummary
-Simulator ..> RebuildResult
+ControlChannel ..> Action
+ControlChannel ..> ChannelStatus
+Simulator ..> RebuildAccess
+RebuildAccess ..> RebuildResult
 Simulator ..> RunInfo
 SimulationRuntime ..> RunInfo
 SimulatorCore *-- FmuHandler

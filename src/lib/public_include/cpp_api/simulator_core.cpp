@@ -68,18 +68,18 @@ namespace ssp4sim
         }
 
         /// Advance one step bounded by `limit_ns` and end_time. No pacing.
-        StepStatus step_to(uint64_t limit_ns)
+        bool step_to(uint64_t limit_ns)
         {
             const uint64_t end_time = conf->fmu.end_time;
 
             if (sim_time_ns >= end_time)
             {
-                return StepStatus::Completed;
+                return true;
             }
 
             if (limit_ns <= sim_time_ns)
             {
-                return StepStatus::Advanced;
+                return false;
             }
 
             uint64_t step_end = sim_time_ns + conf->fmu.timestep;
@@ -89,8 +89,7 @@ namespace ssp4sim
             simulation_node->invoke(graph::StepData(sim_time_ns, step_end));
             sim_time_ns = step_end;
 
-            return sim_time_ns >= end_time ? StepStatus::Completed
-                                           : StepStatus::Advanced;
+            return sim_time_ns >= end_time;
         }
     };
 
@@ -233,7 +232,7 @@ namespace ssp4sim
         p->started = true;
     }
 
-    StepStatus SimulatorCore::step()
+    bool SimulatorCore::step()
     {
         if (!p->started || p->finished)
         {
@@ -243,13 +242,13 @@ namespace ssp4sim
 
         if (p->sim_time_ns >= p->conf->fmu.end_time)
         {
-            return StepStatus::Completed;
+            return true;
         }
 
         return p->step_to(p->sim_time_ns + p->conf->fmu.timestep);
     }
 
-    StepStatus SimulatorCore::advance_to(uint64_t target_ns)
+    bool SimulatorCore::advance_to(uint64_t target_ns)
     {
         if (!p->started || p->finished)
         {
@@ -265,19 +264,18 @@ namespace ssp4sim
 
         if (p->sim_time_ns >= end_time)
         {
-            return StepStatus::Completed;
+            return true;
         }
 
         while (p->sim_time_ns < target_ns)
         {
-            const StepStatus status = p->step_to(target_ns);
-            if (status == StepStatus::Completed)
+            if (p->step_to(target_ns))
             {
-                return status;
+                return true;
             }
         }
 
-        return StepStatus::Advanced;
+        return false;
     }
 
     uint64_t SimulatorCore::sim_time_ns() const noexcept
