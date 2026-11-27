@@ -1,7 +1,6 @@
 #include "daemon.hpp"
 
 #include "runtime_control.hpp"
-#include "simulation/runtime/simulator_rebuild.hpp"
 
 #include <chrono>
 #include <cmath>
@@ -170,17 +169,14 @@ namespace ssp4simd
     }
 
     Daemon::Daemon(std::string config_path)
-        : config_path_(std::move(config_path)),
-          config_(ssp4sim::SharedConfig::from_file(config_path_))
     {
-        if (config_.snapshot_dir)
+        auto config = ssp4sim::SharedConfig::from_file(config_path);
+        if (config.snapshot_dir)
         {
             snapshot_dir_ =
-                std::filesystem::weakly_canonical(*config_.snapshot_dir);
+                std::filesystem::weakly_canonical(*config.snapshot_dir);
         }
 
-        // Retain the configuration before handing a copy to the runner.
-        auto config = config_;
         runner_ = std::make_unique<ssp4sim::Simulator>(std::move(config));
         runner_->init();
         const auto info = runner_->info();
@@ -188,21 +184,23 @@ namespace ssp4simd
     }
 
     Daemon::Daemon(Daemon &&other) noexcept
-        : config_path_(std::move(other.config_path_)),
-          config_(std::move(other.config_)),
-          snapshot_dir_(std::move(other.snapshot_dir_)),
+        : snapshot_dir_(std::move(other.snapshot_dir_)),
           runner_(std::move(other.runner_)),
+          snapshot_requests_(std::move(other.snapshot_requests_)),
+          snapshot_completions_(std::move(other.snapshot_completions_)),
+          snapshot_thread_(std::move(other.snapshot_thread_)),
+          snapshot_stopping_(other.snapshot_stopping_),
           lifecycle_thread_(std::move(other.lifecycle_thread_)),
-          prepared_runner_(std::move(other.prepared_runner_)),
+          lifecycle_ok_(other.lifecycle_ok_),
           lifecycle_error_(std::move(other.lifecycle_error_)),
           lifecycle_ready_(other.lifecycle_ready_),
           lifecycle_had_run_(other.lifecycle_had_run_),
-          lifecycle_old_state_(other.lifecycle_old_state_),
-          lifecycle_old_sim_time_ns_(other.lifecycle_old_sim_time_ns_),
+          lifecycle_old_info_(other.lifecycle_old_info_),
           lifecycle_old_error_(std::move(other.lifecycle_old_error_)),
           lifecycle_busy_(other.lifecycle_busy_),
           lifecycle_operation_(other.lifecycle_operation_),
           lifecycle_start_(other.lifecycle_start_),
+          lifecycle_cached_info_(other.lifecycle_cached_info_),
           events_(std::move(other.events_)),
           last_time_emit_(other.last_time_emit_),
           last_time_sim_ns_(other.last_time_sim_ns_),
@@ -219,7 +217,7 @@ namespace ssp4simd
 
     void Daemon::shutdown()
     {
-        // A lifecycle rebuild owns the old runner until it hands back.
+        // A lifecycle operation owns the runner until its thread finishes.
         if (lifecycle_thread_.joinable())
         {
             lifecycle_thread_.join();
@@ -228,17 +226,20 @@ namespace ssp4simd
         {
             std::lock_guard<std::mutex> lock(lifecycle_mutex_);
             lifecycle_ready_ = false;
+            lifecycle_ok_ = false;
             lifecycle_error_.clear();
-            prepared_runner_.reset();
+            lifecycle_had_run_ = false;
+            lifecycle_old_info_ = {};
+            lifecycle_old_error_.clear();
         }
         lifecycle_busy_ = false;
         lifecycle_operation_ = LifecycleOperation::None;
         lifecycle_start_ = false;
 
-        stop_and_wait();
-        // The run is terminal now, so an in-flight blocking snapshot has been
-        // unblocked by the run ending; join the worker before teardown.
+        // Take the snapshot worker down first so it cannot observe the runner
+        // while shutdown tears it down.
         stop_snapshot_worker();
+        stop_and_wait();
         monitor_tick();
     }
 
@@ -260,9 +261,9 @@ namespace ssp4simd
             const auto id = request_id(request);
             const auto command = request["cmd"].get<std::string>();
 
-            // A lifecycle rebuild owns the runner and its configuration until
-            // the poll thread takes the handoff. Only observation and teardown
-            // remain safe while it runs.
+            // A lifecycle operation owns the runner until the poll thread
+            // takes the handoff. Only observation and teardown remain safe
+            // while it runs.
             if (lifecycle_busy_ && command != "state" && command != "shutdown")
             {
                 return make_error(id, "server_busy",
@@ -378,7 +379,7 @@ namespace ssp4simd
             }
             if (command == "shutdown")
             {
-                stop_and_wait();
+                shutdown();
                 return make_ok(id);
             }
 
@@ -398,7 +399,8 @@ namespace ssp4simd
 
     json Daemon::do_state(const json &id)
     {
-        const auto info = runner_->info();
+        const auto info =
+            lifecycle_busy_ ? lifecycle_cached_info_ : runner_->info();
         json response = make_ok(id);
         response["state"] = state_to_string(info.state);
         response["sim_time"] = ns_to_seconds(info.sim_time_ns);
@@ -479,9 +481,18 @@ namespace ssp4simd
         {
             std::lock_guard<std::mutex> lock(lifecycle_mutex_);
             lifecycle_ready_ = false;
+            lifecycle_ok_ = false;
             lifecycle_error_.clear();
-            prepared_runner_.reset();
+            lifecycle_had_run_ = false;
+            lifecycle_old_info_ = {};
+            lifecycle_old_error_.clear();
         }
+
+        // The lifecycle thread becomes the only user of the runner, so the
+        // snapshot worker must be gone first; its pending requests settle as
+        // run_ended.
+        stop_snapshot_worker();
+        lifecycle_cached_info_ = runner_->info();
 
         lifecycle_busy_ = true;
         lifecycle_operation_ = operation;
@@ -495,21 +506,62 @@ namespace ssp4simd
     void Daemon::run_lifecycle(LifecycleOperation operation,
                                std::filesystem::path snapshot)
     {
-        // Uses the old runner while it is still the only runner. The poll
-        // thread does not swap or wait until lifecycle_ready_ is published.
-        const std::filesystem::path *snapshot_path =
-            operation == LifecycleOperation::Restore ? &snapshot : nullptr;
+        // Uses the public lifecycle API on the one runner. The poll thread
+        // does not touch the runner until lifecycle_ready_ is published.
+        const auto before = runner_->info();
+        const bool had_run =
+            before.state != ssp4sim::RunState::Created &&
+            before.state != ssp4sim::RunState::Initialized;
 
-        auto result = ssp4sim::detail::RebuildAccess::rebuild(
-            runner_.get(), config_, snapshot_path);
+        std::string old_error;
+        if (had_run)
+        {
+            runner_->shutdown();
+            try
+            {
+                (void)runner_->wait();
+            }
+            catch (const std::exception &error)
+            {
+                old_error = error.what();
+            }
+            catch (...)
+            {
+                old_error = "unknown error";
+            }
+        }
+
+        const auto old_info = runner_->info();
+
+        bool ok = false;
+        std::string message;
+        try
+        {
+            if (operation == LifecycleOperation::Restore)
+            {
+                runner_->restore(snapshot, false);
+            }
+            else
+            {
+                runner_->reset();
+            }
+            ok = true;
+        }
+        catch (const std::exception &error)
+        {
+            message = error.what();
+        }
+        catch (...)
+        {
+            message = "unknown error";
+        }
 
         std::lock_guard<std::mutex> lock(lifecycle_mutex_);
-        prepared_runner_ = std::move(result.replacement);
-        lifecycle_error_ = std::move(result.message);
-        lifecycle_had_run_ = result.had_run;
-        lifecycle_old_state_ = result.old_info.state;
-        lifecycle_old_sim_time_ns_ = result.old_info.sim_time_ns;
-        lifecycle_old_error_ = std::move(result.old_run_error);
+        lifecycle_ok_ = ok;
+        lifecycle_error_ = std::move(message);
+        lifecycle_had_run_ = had_run;
+        lifecycle_old_info_ = old_info;
+        lifecycle_old_error_ = std::move(old_error);
         lifecycle_ready_ = true;
     }
 
@@ -675,16 +727,19 @@ namespace ssp4simd
                 completion.ok = runner_->snapshot(request.path);
                 if (!completion.ok)
                 {
-                    completion.code = "snapshot_failed";
-                    completion.message = "snapshot failed";
+                    const ssp4sim::RunState state = runner_->info().state;
+                    if (state != ssp4sim::RunState::Running &&
+                        state != ssp4sim::RunState::Paused)
+                    {
+                        completion.code = "run_ended";
+                        completion.message = "run ended before snapshot";
+                    }
+                    else
+                    {
+                        completion.code = "snapshot_failed";
+                        completion.message = "snapshot failed";
+                    }
                 }
-            }
-            catch (const std::logic_error &error)
-            {
-                // The run left Running/Paused before this request reached the
-                // loop top; report it like a queued snapshot cancelled by stop.
-                completion.code = "run_ended";
-                completion.message = error.what();
             }
             catch (const std::exception &error)
             {
@@ -734,11 +789,10 @@ namespace ssp4simd
 
         if (lifecycle_busy_)
         {
-            std::unique_ptr<ssp4sim::Simulator> prepared;
+            bool ok = false;
             std::string error;
             bool had_run = false;
-            ssp4sim::RunState old_state = ssp4sim::RunState::Created;
-            uint64_t old_sim_time_ns = 0;
+            ssp4sim::RunInfo old_info{};
             std::string old_error;
             {
                 std::lock_guard<std::mutex> lock(lifecycle_mutex_);
@@ -746,13 +800,13 @@ namespace ssp4simd
                 {
                     return;
                 }
-                prepared = std::move(prepared_runner_);
+                ok = lifecycle_ok_;
                 error = lifecycle_error_;
                 had_run = lifecycle_had_run_;
-                old_state = lifecycle_old_state_;
-                old_sim_time_ns = lifecycle_old_sim_time_ns_;
+                old_info = lifecycle_old_info_;
                 old_error = lifecycle_old_error_;
                 lifecycle_ready_ = false;
+                lifecycle_ok_ = false;
                 lifecycle_error_.clear();
             }
 
@@ -762,50 +816,38 @@ namespace ssp4simd
             lifecycle_operation_ = LifecycleOperation::None;
             lifecycle_start_ = false;
 
-            // The lifecycle build stopped and joined the old run. Settle any
-            // snapshot work against it before the runner can be replaced.
-            stop_snapshot_worker();
             drain_snapshot_completions();
 
-            const double old_speed = runner_->info().speed;
             const bool already_reported =
                 ssp4sim::is_terminal(observed_state_) &&
-                observed_state_ == old_state;
-            if (had_run && ssp4sim::is_terminal(old_state) &&
+                observed_state_ == old_info.state;
+            if (had_run && ssp4sim::is_terminal(old_info.state) &&
                 !already_reported)
             {
-                if (old_state != observed_state_)
+                if (old_info.state != observed_state_)
                 {
-                    emit(state_event(ssp4sim::RunInfo{old_state,
-                                                      old_sim_time_ns,
-                                                      old_speed}));
+                    emit(state_event(old_info));
                 }
-                if (old_state == ssp4sim::RunState::Failed &&
+                if (old_info.state == ssp4sim::RunState::Failed &&
                     !old_error.empty())
                 {
                     emit(error_event("simulation_failed", old_error));
                 }
-                emit(done_event(ssp4sim::terminal_result(old_state),
-                                old_sim_time_ns));
+                emit(done_event(ssp4sim::terminal_result(old_info.state),
+                                old_info.sim_time_ns));
             }
 
             // The old terminal must not be reported again by the generic path.
-            observed_state_ = old_state;
+            observed_state_ = old_info.state;
             last_time_emit_ = now;
-            last_time_sim_ns_ = old_sim_time_ns;
+            last_time_sim_ns_ = old_info.sim_time_ns;
 
-            if (!prepared)
+            if (!ok)
             {
-                emit(lifecycle_event(
-                    operation, false, error,
-                    ssp4sim::RunInfo{old_state, old_sim_time_ns, old_speed}));
+                emit(lifecycle_event(operation, false, error, old_info));
             }
             else
             {
-                // Reset discards all per-run state: destroy the old simulator
-                // as a distinct step, then install the fresh runner.
-                runner_.reset();
-                runner_ = std::move(prepared);
                 const auto info = runner_->info();
                 reset_monitor_baseline(info);
                 emit(state_event(info));
@@ -844,8 +886,7 @@ namespace ssp4simd
             {
                 std::lock_guard<std::mutex> lock(lifecycle_mutex_);
                 lifecycle_had_run_ = false;
-                lifecycle_old_state_ = ssp4sim::RunState::Created;
-                lifecycle_old_sim_time_ns_ = 0;
+                lifecycle_old_info_ = {};
                 lifecycle_old_error_.clear();
             }
         }

@@ -634,6 +634,77 @@ def test_shutdown_immediately_after_start(tmp_path: Path) -> None:
             instance.shutdown()
 
 
+def test_shutdown_during_reset(tmp_path: Path) -> None:
+    if not FIXTURE.exists():
+        pytest.skip(f"missing reference fixture: {FIXTURE}")
+
+    with tempfile.TemporaryDirectory(prefix="ssp4simd-") as socket_dir:
+        socket_path = Path(socket_dir) / "s.sock"
+        instance = Daemon(
+            tmp_path / "shutdown_during_reset",
+            socket_path,
+            stop_time=60.0,
+            speed=1.0,
+        )
+        try:
+            assert instance.response({"v": 1, "id": 82, "cmd": "start"})["ok"]
+            running = instance.wait_event("state")
+            while running["state"] != "running":
+                running = instance.wait_event("state")
+            assert running["state"] == "running", running
+
+            reset = instance.response({"v": 1, "id": 83, "cmd": "reset"})
+            assert reset["ok"] and reset["accepted"], reset
+
+            assert instance.response({"v": 1, "id": 84, "cmd": "shutdown"})["ok"]
+
+            # A reset in flight must not prevent the lifecycle thread join.
+            assert instance.process.wait(timeout=15) == 0
+            assert not socket_path.exists()
+        finally:
+            instance.shutdown()
+
+
+def test_state_during_reset(tmp_path: Path) -> None:
+    if not FIXTURE.exists():
+        pytest.skip(f"missing reference fixture: {FIXTURE}")
+
+    with tempfile.TemporaryDirectory(prefix="ssp4simd-") as socket_dir:
+        socket_path = Path(socket_dir) / "s.sock"
+        instance = Daemon(
+            tmp_path / "state_during_reset",
+            socket_path,
+            stop_time=60.0,
+            speed=1.0,
+        )
+        try:
+            assert instance.response({"v": 1, "id": 85, "cmd": "start"})["ok"]
+            running = instance.wait_event("state")
+            while running["state"] != "running":
+                running = instance.wait_event("state")
+            assert running["state"] == "running", running
+
+            reset = instance.response({"v": 1, "id": 86, "cmd": "reset"})
+            assert reset["ok"] and reset["accepted"], reset
+
+            state = instance.response({"v": 1, "id": 87, "cmd": "state"})
+            assert state["ok"] is True, state
+            assert "error" not in state, state
+            assert state["state"] in {
+                "running",
+                "paused",
+                "stopped",
+                "initialized",
+            }, state
+
+            lifecycle = instance.wait_lifecycle("reset")
+            assert lifecycle["state"] == "initialized", lifecycle
+
+            assert instance.response({"v": 1, "id": 88, "cmd": "shutdown"})["ok"]
+        finally:
+            instance.shutdown()
+
+
 def test_snapshot_and_restore(tmp_path: Path) -> None:
     if not DAHLQUIST.exists():
         pytest.skip(f"missing reference fixture: {DAHLQUIST}")

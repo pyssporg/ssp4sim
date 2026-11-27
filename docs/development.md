@@ -22,9 +22,10 @@ the single locked queue/status object, and the internal simulation side.
   only the creation config, posts `Start`/`Pause`/`Resume`/`Stop`/`SetSpeed`/
   `Snapshot` through its internal runtime's `ControlChannel`, reads status
   through it, and delegates the run thread and outer loop to that runtime.
-  `restore`, `reset`, and the daemon use the internal
-  `detail::RebuildAccess::rebuild` helper, which builds replacements through
-  the private `create_initialized`/`create_restored` factories.
+  `restore` and `reset` use the internal `detail::RebuildAccess::rebuild`
+  helper, which builds replacements through the private
+  `create_initialized`/`create_restored` factories. The daemon is a pure
+  public-`Simulator` client and never includes the internal rebuild header.
 - **Control channel** —
   `src/lib/include/simulation/runtime/control_channel.{hpp,cpp}`:
   `ControlChannel` is the only shared object between the caller and the run

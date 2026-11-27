@@ -365,11 +365,13 @@ disconnected. `state`, `done`, `error`, `snapshot`, and
 `lifecycle` events are not droppable.
 
 **`reset` and `shutdown`.** `reset` is asynchronous: it replies `accepted` and
-rebuilds on a background thread. While that job runs, `state` and `shutdown`
-still work but every mutating command (including `snapshot`) returns
-`server_busy`. The background thread stops and joins any live run, emits its
-terminal `state` and `done` before the fresh `initialized` state, destroys the
-old runner, and installs a freshly constructed, initialized runner built from
+runs on a background thread. While that job runs, `state` is served from the
+`RunInfo` captured when the job began and `shutdown` still works, but every
+mutating command (including `snapshot`) returns `server_busy`. The background
+thread stops and joins any live run and calls the public `Simulator::reset()`;
+the poll thread emits the old run's terminal `state` and `done` before the fresh
+`initialized` state. `Simulator::reset()` replaces the session in place with a
+freshly built initialized one from
 the original parsed config, so no in-memory simulation state (FMUs, rings,
 resolver frontiers, time, or pending snapshot requests) survives. Configured output
 destinations are reused rather than deleted: CSV truncates when the new sink
@@ -405,14 +407,17 @@ so `..` and symlinks that resolve outside are rejected too. When the key is
 absent, any path is accepted.
 
 `restore` is asynchronous like `reset`: it replies `accepted`, stops and joins
-any live run on a background thread, rebuilds the runner from the same config,
-and loads the snapshot. It requires the same SSP (content hash); experiment
-timing (start, timestep, and end) comes from the live config. On completion the
-`lifecycle` event with `operation:"restore"` reports `ok:true` and the resulting
-`state`/`sim_time`, or `ok:false` with `restore_failed`. With `start:false` the
-new run is `Initialized` and remains stopped (`state` confirms it, and `start`
-works once the lifecycle event has cleared the busy state); with the default
-`start:true` it starts immediately and keeps the prior run's speed (the pace is
+any live run on a background thread and calls the public
+`Simulator::restore(path, false)`, which replaces the session in place from the
+same config and loads the snapshot; the poll thread emits the old run's terminal
+`state` and `done` before the fresh state. It requires the same SSP
+(content hash); experiment timing (start, timestep, and end) comes from the live
+config. On completion the `lifecycle` event with `operation:"restore"` reports
+`ok:true` and the resulting `state`/`sim_time`, or `ok:false` with
+`restore_failed`. With `start:false` the new run is `Initialized` and remains
+stopped (`state` confirms it, and `start` works once the lifecycle event has
+cleared the busy state); with the default `start:true` the poll thread starts it
+once the fresh session is installed, keeping the prior run's speed (the pace is
 carried into the fresh control before start, not reapplied after). All FMUs in
 the SSP must declare `canGetAndSetFMUstate` and `canSerializeFMUstate`
 (all-or-nothing), or restore fails. Snapshot files are build/version specific

@@ -18,10 +18,10 @@
 namespace ssp4simd
 {
     /// Owns the single Simulator as the async runtime. Every entry point is called from
-    /// the server's poll thread. The only exception is a lifecycle rebuild,
-    /// which runs on lifecycle_thread_ and hands its result back to the poll
-    /// thread through lifecycle_mutex_. Events are pulled by the server through
-    /// collect_events().
+    /// the server's poll thread. The only exception is a lifecycle operation,
+    /// which drives the public Simulator API on lifecycle_thread_ and hands its
+    /// result back to the poll thread through lifecycle_mutex_. Events are pulled
+    /// by the server through collect_events().
     class Daemon
     {
     public:
@@ -91,11 +91,8 @@ namespace ssp4simd
         void run_snapshot_worker();
         void reset_monitor_baseline(const ssp4sim::RunInfo &info);
 
-        std::string config_path_;
-
-        // Configuration retained before it is moved into the runner, and the
-        // canonical checkpoint path policy (empty means any path is allowed).
-        ssp4sim::SharedConfig config_;
+        // The canonical checkpoint path policy (empty means any path is
+        // allowed).
         std::optional<std::filesystem::path> snapshot_dir_;
 
         std::unique_ptr<ssp4sim::Simulator> runner_;
@@ -111,23 +108,23 @@ namespace ssp4simd
         std::thread snapshot_thread_;
         bool snapshot_stopping_ = false;
 
-        // Lifecycle rebuild handoff. The background thread owns the stop/build
-        // and publishes its result under lifecycle_mutex_; the poll thread owns
-        // every assignment to runner_ and events_.
+        // Lifecycle handoff. The background thread drives the public lifecycle
+        // API on runner_ and publishes its result under lifecycle_mutex_; the
+        // poll thread observes the runner only after it takes that result.
         std::thread lifecycle_thread_;
         std::mutex lifecycle_mutex_;
-        std::unique_ptr<ssp4sim::Simulator> prepared_runner_;
+        bool lifecycle_ok_ = false;
         std::string lifecycle_error_;
         bool lifecycle_ready_ = false;
         bool lifecycle_had_run_ = false;
-        ssp4sim::RunState lifecycle_old_state_ = ssp4sim::RunState::Created;
-        uint64_t lifecycle_old_sim_time_ns_ = 0;
+        ssp4sim::RunInfo lifecycle_old_info_{};
         std::string lifecycle_old_error_;
 
         // Poll-thread only.
         bool lifecycle_busy_ = false;
         LifecycleOperation lifecycle_operation_ = LifecycleOperation::None;
         bool lifecycle_start_ = false;
+        ssp4sim::RunInfo lifecycle_cached_info_{};
 
         std::vector<json> events_;
 
