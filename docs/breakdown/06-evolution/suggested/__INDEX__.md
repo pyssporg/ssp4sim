@@ -20,7 +20,6 @@ summary: Improvement candidates not yet selected for development
 - **IMP-047** [Replace vendored reference SSPs with small in-repo e2e fixtures](IMP-047.md) — Drop the resources/reference_ssp submodule, add small in-repo fixtures, and outsource full e2e to ssp_references
 - **IMP-048** [Dependency-ordered FMU initialization for SSPs needing connected inputs at init](IMP-048.md) — Initialize co-simulation FMUs source-first so downstream FMUs see committed upstream outputs before exiting init
 - **IMP-049** [Remove the recorder from the executor](IMP-049.md) — Remove the recorder from the executor and inject it into models earlier in the construction path
-- **IMP-050** [Split graph_executor into macro and realtime macro step executors](IMP-050.md) — Make graph_executor.cpp a pure macro step executor and split out a realtime macro step executor
 - **IMP-051** [Set the read target resolver during the pipeline](IMP-051.md) — Design and set the read target resolver during the pipeline build before patching
 - **IMP-052** [Executors take ownership of invocables](IMP-052.md) — All executors should take ownership of the invocables passed to them, propagating the top-layer refactor downward
 - **IMP-053** [Atomic id counter and static max_id on Node for vector indexing](IMP-053.md) — Give Node an atomic id and static max_id so node lookup becomes vector indexing, replacing the Invocable id

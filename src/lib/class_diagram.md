@@ -1,30 +1,56 @@
 classDiagram
 
 class Simulator {
-  +runner: std::unique_ptr<ThreadedRunner>
+  +config: SharedConfig
   +Simulator(config)
   +init()
   +simulate()
   +start()
+  +pause(at_sim_time_ns)
+  +resume()
+  +stop(at_sim_time_ns)
+  +set_speed(speed, at_sim_time_ns)
   +info() RunInfo
-  +wait()
+  +wait() RunResult
+  +shutdown()
+  +snapshot(path) bool
+  +restore(path, start)
+  +reset()
+  +create_initialized(config)$ std::unique_ptr<Simulator>
+  +create_restored(config, path)$ std::unique_ptr<Simulator>
+  -submit_and_wait(action)
+  -shutdown_report() std::string
 }
 
-class ThreadedRunner {
-  +stepper: std::unique_ptr<SimulationStepper>
-  +control: std::shared_ptr<control::RunControl>
-  +run_mutex: std::mutex
+note for Simulator "Simulator is the caller facade and sole action producer: it retains the creation config, posts Start/Pause/Resume/Stop/SetSpeed/Snapshot through its SimulationRuntime's ControlChannel with post/post_and_wait, and reads status through it. The runtime only applies actions and publishes state. restore/reset construct replacements through the private factories via detail::RebuildAccess."
+
+class SimulationRuntime {
+  +config: SharedConfig
+  +log: Logger*
+  +core: std::unique_ptr<SimulatorCore>
+  +channel: std::unique_ptr<ControlChannel>
+  +clock: PacingClock
+  +lifecycle_mutex: std::mutex
   +run_thread: std::thread
   +run_future: std::shared_future<RunResult>
   +run_started: bool
-  +start()
-  +run(): RunResult
-  +info() RunInfo
+  +init()
+  +start_thread()
+  +wait() RunResult
+  +join() std::string
+  +load_snapshot(path)
+  +control() ControlChannel&
+  +started() bool
+  +set_speed_before_start(speed)
+  +cancel_before_start()
+  +apply(action) bool
+  +next_pacing_deadline()
+  +run() RunResult
 }
 
-note for ThreadedRunner "run() owns the outer macro-step loop: calls RunControl::before_slice(), SimulationStepper::step(), RunControl::publish_boundary(), then flushes and finalizes through RunControl::finish()"
+note for SimulationRuntime "SimulationRuntime owns the synchronous core, the run thread/future guarded by a separate lifecycle mutex, and the outer macro-step loop, and it never posts actions. ControlChannel is the single locked queue/status object: one mutex, one condition variable, one multimap<due_ns, Action> and the published ChannelStatus; only the runtime writes RunState. run() takes a due Action, steps when Running, otherwise waits on the channel condition variable; the epilogue closes the channel, publishes the final time, flushes the recorder, then publishes the terminal state."
 
-class SimulationStepper {
+class SimulatorCore {
   +ssp: std::unique_ptr<Ssp>
   +conf: std::unique_ptr<SharedConfig>
   +session_uuid: std::string
@@ -34,25 +60,79 @@ class SimulationStepper {
   +simulation_node: std::shared_ptr<graph::Invocable>
   +init()
   +start()
-  +step(): StepStatus
-  +advance_to(target): StepStatus
+  +step(): bool
+  +advance_to(target): bool
   +sim_time_ns() uint64_t
   +end_time_ns() uint64_t
+  +save_snapshot(path) bool
+  +load_snapshot(path)
   +finish()
 }
 
-class RunControl {
+class Action {
+  +seq: uint64_t
+  +kind: ActionKind
+  +at_ns: uint64_t
+  +speed: double
+  +path: std::string
+  +status: ActionStatus
+}
+
+class ChannelStatus {
+  +state: RunState
+  +sim_time_ns: uint64_t
+  +speed: double
+  +applied_seq: uint64_t
+  +error: std::exception_ptr
+}
+
+class ControlChannel {
   +mutex_: std::mutex
   +cv_: std::condition_variable
-  +deferred_: std::multimap
   +state_: RunState
   +sim_time_ns_: uint64_t
   +speed_: double
-  +before_slice(slice_start_ns) bool
-  +publish_boundary(boundary_ns)
-  +request_stop()
-  +finish(result) RunResult
-  +info() RunInfo
+  +applied_seq_: uint64_t
+  +queue_: std::multimap<uint64_t, Action>
+  +closed_: bool
+  +post(action) uint64_t
+  +post_and_wait(action) AppliedAction
+  +status() ChannelStatus
+  +pending() size_t
+  +take_due(sim_time_ns) optional<Action>
+  +wait_for_work(sim_time_ns, deadline)
+  +publish_time(sim_time_ns)
+  +set_speed(speed)
+  +set_state(state)
+  +publish_error(error)
+  +settle(seq, status, error)
+  +close(error)
+  +wait_terminal() RunState
+}
+
+class PacingClock {
+  +speed_: double
+  +anchor_wall_ns_: int64_t
+  +anchor_sim_ns_: uint64_t
+  +speed() double
+  +anchor_wall_ns() int64_t
+  +anchor_sim_ns() uint64_t
+  +apply_speed(speed, sim_time_ns)
+  +anchor_at(sim_time_ns)
+  +deadline_ns(...)$ uint64_t
+}
+
+class RebuildResult {
+  +replacement: std::unique_ptr
+  +exception: std::exception_ptr
+  +message: std::string
+  +old_info: RunInfo
+  +old_run_error: std::string
+  +had_run: bool
+}
+
+class RebuildAccess {
+  +rebuild(old, config, snapshot)$ RebuildResult
 }
 
 class RunInfo {
@@ -190,16 +270,21 @@ class RunInfo {
   }
 
 
-Simulator *-- ThreadedRunner
-ThreadedRunner *-- RunControl
-ThreadedRunner *-- SimulationStepper
-ThreadedRunner ..> RunInfo
+Simulator *-- SimulationRuntime
+SimulationRuntime *-- ControlChannel
+SimulationRuntime *-- PacingClock
+SimulationRuntime *-- SimulatorCore
+ControlChannel ..> Action
+ControlChannel ..> ChannelStatus
+Simulator ..> RebuildAccess
+RebuildAccess ..> RebuildResult
 Simulator ..> RunInfo
-SimulationStepper *-- FmuHandler
-SimulationStepper *-- DataRecorder
-SimulationStepper *-- Graph
-SimulationStepper *-- GraphBuilder
-SimulationStepper *--  AnalysisGraphBuilder
+SimulationRuntime ..> RunInfo
+SimulatorCore *-- FmuHandler
+SimulatorCore *-- DataRecorder
+SimulatorCore *-- Graph
+SimulatorCore *-- GraphBuilder
+SimulatorCore *--  AnalysisGraphBuilder
 AnalysisGraph --> GraphBuilder
 
 FmuHandler *-- "many" FmuInfo

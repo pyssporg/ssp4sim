@@ -1,5 +1,6 @@
 #include "signal/storage.hpp"
 
+#include <algorithm>
 #include <memory>
 #include <new>
 #include <sstream>
@@ -32,16 +33,11 @@ namespace ssp4sim::signal
             return;
         }
 
-        for (std::size_t area_index = 0; area_index < areas; area_index++)
+        for (const StringSlot &slot : string_slots)
         {
-            for (const auto &variable : variables)
-            {
-                if (variable.type == types::DataType::string)
-                {
-                    auto value_ptr = reinterpret_cast<std::string *>(locations[area_index][variable.index]);
-                    std::destroy_at(value_ptr);
-                }
-            }
+            auto value_ptr =
+                reinterpret_cast<std::string *>(locations[slot.area][slot.index]);
+            std::destroy_at(value_ptr);
         }
     }
 
@@ -86,6 +82,11 @@ namespace ssp4sim::signal
 
         variables.push_back(std::move(d));
 
+        if (variables.back().type == types::DataType::string)
+        {
+            ++string_variable_count;
+        }
+
         return variables.size() - 1; // the index is the position -1
     }
 
@@ -114,6 +115,7 @@ namespace ssp4sim::signal
 
         locations.resize(areas);
         derivative_locations.resize(areas);
+        string_slots.clear();
 
         for (std::size_t area_index = 0; area_index < areas; area_index++)
         {
@@ -127,6 +129,10 @@ namespace ssp4sim::signal
                 if (variable.type == types::DataType::string)
                 {
                     LOG_DEBUG(log, "[{func}] Setting string {index}:{name} - {type}", __func__, variable.index, variable.name, variable.type.to_string());
+                    const std::size_t offset =
+                        area_index * ring->buffers.aligned_size + variable.position;
+                    string_slots.push_back(
+                        {area_index, variable.index, {offset, variable.type_size}});
                     auto s = reinterpret_cast<std::string *>(locations[area_index][variable.index]);
                     std::construct_at(s);
                 }
@@ -144,6 +150,113 @@ namespace ssp4sim::signal
     size_t SignalStorage::push(uint64_t time)
     {
         return ring->push(time);
+    }
+
+    bool SignalStorage::has_string_variables() const noexcept
+    {
+        return string_variable_count != 0;
+    }
+
+    std::vector<serialize::ByteRange> SignalStorage::string_ranges() const
+    {
+        std::vector<serialize::ByteRange> ranges;
+        ranges.reserve(string_slots.size());
+        for (const StringSlot &slot : string_slots)
+        {
+            ranges.push_back(slot.range);
+        }
+        return ranges;
+    }
+
+    void SignalStorage::serialize(serialize::Writer &out) const
+    {
+        if (!ring)
+        {
+            throw serialize::Error("serialize: storage '" + name +
+                                   "' is not allocated");
+        }
+
+        const std::size_t ring_capacity = ring->capacity;
+        const std::vector<serialize::ByteRange> ranges = string_ranges();
+
+        serialize::write_text(out, name, "storage.name");
+        serialize::write_size(out, areas);
+        serialize::write_size(out, area_byte_size);
+        serialize::write_size(out, ring_capacity);
+
+        ring->serialize(out, ranges);
+
+        serialize::StringTable table;
+        for (const StringSlot &slot : string_slots)
+        {
+            const auto &value = *reinterpret_cast<const std::string *>(
+                locations[slot.area][slot.index]);
+            table.add(slot.area, slot.index, variables[slot.index].name, value);
+        }
+        table.write(out);
+    }
+
+    void SignalStorage::deserialize(serialize::Reader &in)
+    {
+        const std::string serialized_name =
+            serialize::read_text(in, "storage.name");
+        const std::size_t serialized_areas = serialize::read_size(in);
+        const std::size_t serialized_area_byte_size = serialize::read_size(in);
+        const std::size_t serialized_ring_capacity = serialize::read_size(in);
+
+        serialize::require_equal("storage.name", name, serialized_name);
+        serialize::require_equal("storage.areas", areas, serialized_areas);
+        serialize::require_equal("storage.area_byte_size", area_byte_size,
+                                 serialized_area_byte_size);
+        if (!ring)
+        {
+            throw serialize::Error("serialize: storage '" + name +
+                                   "' is not allocated");
+        }
+        serialize::require_equal("storage.ring.capacity", ring->capacity,
+                                 serialized_ring_capacity);
+
+        const std::vector<serialize::ByteRange> ranges = string_ranges();
+
+        ring->deserialize(in, ranges);
+
+        serialize::StringTable table = serialize::StringTable::read(in);
+        serialize::require_equal("storage.strings.size", string_slots.size(),
+                                 table.size());
+
+        // Validate every expected slot before touching any live string.
+        for (const StringSlot &slot : string_slots)
+        {
+            const serialize::StringEntry *entry =
+                table.find(slot.area, slot.index);
+            if (entry == nullptr)
+            {
+                serialize::require_equal(
+                    "storage.strings.coverage",
+                    std::to_string(slot.area) + "," +
+                        std::to_string(slot.index),
+                    "missing");
+            }
+            serialize::require_equal("storage.strings.name",
+                                     variables[slot.index].name, entry->name);
+        }
+
+        // All string entries are validated; now rebuild the live objects. Their
+        // raw ring bytes were skipped by the ring deserialize above.
+        for (const StringSlot &slot : string_slots)
+        {
+            auto *value_ptr =
+                reinterpret_cast<std::string *>(locations[slot.area][slot.index]);
+            std::destroy_at(value_ptr);
+        }
+
+        for (const StringSlot &slot : string_slots)
+        {
+            auto *value_ptr =
+                reinterpret_cast<std::string *>(locations[slot.area][slot.index]);
+            std::construct_at(value_ptr);
+            value_ptr->swap(table.find(slot.area, slot.index)->value);
+        }
     }
 
     /**

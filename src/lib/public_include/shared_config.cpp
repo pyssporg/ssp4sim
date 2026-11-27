@@ -71,6 +71,20 @@ namespace ssp4sim
 
         working_dir = std::filesystem::path(cfg.getOr("simulation.working_dir", "./wd/default"));
 
+        // Optional checkpoint path policy. Absent (or null) leaves it
+        // unset, which permits any path.
+        if (const auto *snapshot_dir_node = cfg.resolvePath("simulation.snapshot.directory");
+            snapshot_dir_node != nullptr && !snapshot_dir_node->is_null())
+        {
+            if (!snapshot_dir_node->is_string())
+            {
+                throw std::invalid_argument(
+                    "simulation.snapshot.directory must be a string");
+            }
+            snapshot_dir =
+                std::filesystem::path(snapshot_dir_node->get<std::string>());
+        }
+
         // Model parameters (owns the experiment times).
         fmu.forward_derivatives = cfg.getOr("simulation.executor.forward_derivatives", true);
         fmu.fmu_logging = cfg.getOr("simulation.log.fmu", false);

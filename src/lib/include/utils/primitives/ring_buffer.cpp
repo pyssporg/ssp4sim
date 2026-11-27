@@ -1,12 +1,10 @@
 #include "utils/primitives/ring_buffer.hpp"
 
-#include <cstring>
 #include <sstream>
 #include <stdexcept>
 
 namespace ssp4sim::utils
 {
-
     // There are almost no bound checks in this class
     // use with care...
 
@@ -75,6 +73,74 @@ namespace ssp4sim::utils
         timestamps[(write_count+1) % capacity] = time;
         auto head = push();
         return head;
+    }
+
+    void RingBuffer::serialize(serialize::Writer &out) const
+    {
+        serialize(out, {});
+    }
+
+    void RingBuffer::serialize(
+        serialize::Writer &out,
+        std::span<const serialize::ByteRange> zero_ranges) const
+    {
+        serialize::write_size(out, buffers.original_size);
+        serialize::write_size(out, buffers.aligned_size);
+        serialize::write_size(out, capacity);
+        serialize::write_size(out, head);
+        serialize::write_size(out, write_count);
+
+        serialize::write_u64_vector(out, timestamps);
+        serialize::write_bool_vector(out, populated);
+
+        const std::span<const std::byte> data =
+            buffers.total_size > 0 && buffers.data
+                ? std::span<const std::byte>(buffers.data.get(), buffers.total_size)
+                : std::span<const std::byte>{};
+
+        serialize::write_masked_blob(out, data, zero_ranges);
+    }
+
+    void RingBuffer::deserialize(serialize::Reader &in)
+    {
+        deserialize(in, {});
+    }
+
+    void RingBuffer::deserialize(
+        serialize::Reader &in,
+        std::span<const serialize::ByteRange> skip_ranges)
+    {
+        const std::size_t serialized_original_size = serialize::read_size(in);
+        const std::size_t serialized_aligned_size = serialize::read_size(in);
+        const std::size_t serialized_capacity = serialize::read_size(in);
+        const std::size_t serialized_head = serialize::read_size(in);
+        const std::size_t serialized_write_count = serialize::read_size(in);
+
+        std::vector<std::uint64_t> serialized_timestamps =
+            serialize::read_u64_vector(in);
+        const std::vector<bool> serialized_populated =
+            serialize::read_bool_vector(in);
+
+        serialize::require_equal("ring capacity", capacity, serialized_capacity);
+        serialize::require_equal("ring original_size", buffers.original_size,
+                                 serialized_original_size);
+        serialize::require_equal("ring aligned_size", buffers.aligned_size,
+                                 serialized_aligned_size);
+        serialize::require_equal("ring timestamps.size()", capacity,
+                                 serialized_timestamps.size());
+        serialize::require_equal("ring populated.size()", capacity,
+                                 serialized_populated.size());
+
+        std::span<std::byte> target =
+            buffers.total_size > 0 && buffers.data
+                ? std::span<std::byte>(buffers.data.get(), buffers.total_size)
+                : std::span<std::byte>{};
+        serialize::read_masked_blob(in, target, skip_ranges);
+
+        head = serialized_head;
+        write_count = serialized_write_count;
+        timestamps = std::move(serialized_timestamps);
+        populated = serialized_populated;
     }
 
     /**

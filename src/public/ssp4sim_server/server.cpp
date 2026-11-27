@@ -28,7 +28,8 @@ namespace ssp4simd
 
         bool is_droppable(const json &event)
         {
-            return event.value("event", "") == "time";
+            const std::string name = event.value("event", "");
+            return name == "time";
         }
 
         void set_nonblocking(int fd)

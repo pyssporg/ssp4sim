@@ -14,24 +14,49 @@ For detailed architecture information, see the [architecture layer](breakdown/02
 
 ## Control Modules
 
-Runtime control is split between the synchronous core and the threaded runner:
+Runtime control has three roles across two folders: the caller-facing facade,
+the single locked queue/status object, and the internal simulation side.
 
-- `src/lib/public_include/cpp_api/simulator.hpp`: threaded C++ facade
-  (`Simulator`).
-- `src/lib/public_include/cpp_api/stepper.hpp`: synchronous C++ core
-  (`SimulationStepper`).
+- **Caller facade** — `src/lib/public_include/cpp_api/simulator.hpp`:
+  `Simulator` is the caller-facing facade and the sole action producer. It owns
+  only the creation config, posts `Start`/`Pause`/`Resume`/`Stop`/`SetSpeed`/
+  `Snapshot` through its internal runtime's `ControlChannel`, reads status
+  through it, and delegates the run thread and outer loop to that runtime.
+  `restore` and `reset` use the internal `detail::RebuildAccess::rebuild`
+  helper, which builds replacements through the private
+  `create_initialized`/`create_restored` factories. The daemon is a pure
+  public-`Simulator` client and never includes the internal rebuild header.
+- **Control channel** —
+  `src/lib/include/simulation/runtime/control_channel.{hpp,cpp}`:
+  `ControlChannel` is the only shared object between the caller and the run
+  thread. One mutex and one condition variable guard `RunState`, simulation
+  time, speed, the applied sequence, the last error, and one
+  `std::multimap<due_ns, Action>` of `Start`, `Pause`, `Resume`, `Stop`,
+  `SetSpeed`, and `Snapshot` actions, plus a closed flag. Only the runtime
+  writes `RunState`. `post()` is fire-and-forget; `post_and_wait()` enqueues
+  and blocks for the applied result. `PacingClock` is a separate collaborator
+  with speed, wall/simulation anchors, and pure deadline math; it stores no
+  simulation time.
+- **Simulation side** — same folder:
+  `SimulationRuntime` owns the synchronous `SimulatorCore`, the run thread,
+  the future, a second `lifecycle_mutex_` for that handle only (never nested
+  with the channel lock), and the outer macro-step loop. At each loop top it
+  takes a due action, else steps the core while Running, else waits on the
+  channel condition variable for an action or the pacing deadline. One epilogue
+  closes the channel, publishes the final time, flushes the recorder, then
+  publishes the terminal state; it implements `run()`, `start()`, `wait()`,
+  `shutdown()`, `snapshot()`, and `load_snapshot()`.
+- `src/lib/public_include/cpp_api/simulator_core.hpp`: synchronous C++ core
+  (`SimulatorCore`), which owns `save_snapshot`/`load_snapshot`.
 - `src/lib/public_include/c_api/`: threaded and synchronous C ABIs plus the
   shared status/error header.
-- `src/lib/include/simulation/runner/threaded_runner.*`: the only async layer
-  (run thread, command queue, pacing, `RunState`, `wait`).
-- `src/lib/include/simulation/control/`: `RunControl` state machine, command
-  queue, and run state.
 - `src/lib/public_include/runtime_control.hpp`: public state/result enums,
   shared by the C++, C, and Python surfaces.
 - `src/public/ssp4sim_server/`: the `ssp4simd` frontend (`daemon`, Unix-domain
   socket `server`, NDJSON framing and `protocol`). It links the engine and adds
   no listening network port to the engine.
-- `tests/lib/control/`: unit tests for the control state machine.
+- `tests/lib/control/`: unit tests for `ControlChannel` (queue, state, pacing)
+  and `PacingClock`.
 
 Variable overrides are planned/deferred and are not in current releases.
 
@@ -95,8 +120,8 @@ defaults for keys read from `utils::Config`.
 ## Executor Stacks And The Single-Resolver Rule
 
 Executors nest: `ExecutorBase` is an `Invocable` whose children may themselves be
-executors (e.g. `SerialSeidel -> LinearSubstepExecutor -> FmuModel`). The
-threaded runner owns the outer macro-step loop. When composing a stack:
+executors (e.g. `SerialSeidel -> LinearSubstepExecutor -> FmuModel`). `Simulator`
+owns the outer macro-step loop. When composing a stack:
 
 - **Configuration is parsed once, centrally; options are nested.** The
   `SharedConfig::from_file/from_string/from_json` factories and
@@ -124,12 +149,15 @@ threaded runner owns the outer macro-step loop. When composing a stack:
   scans the registry and requires *exactly one* matching variant — no
   per-family branching: none match is a precise no-match error naming the
   method, more than one is an ambiguity error. The resolved factory builds the
-  specialized executor, which `build` returns directly. `ThreadedRunner::run()`
-  owns the outer macro-step loop: it calls `RunControl::before_slice()` at each
-  slice top (pacing and due commands), calls `SimulationStepper::step()` for one
-  configured slice, publishes the completed boundary, and then flushes and
-  finalizes through `RunControl::finish()`. The synchronous `SimulationStepper`
-  owns slicing, graph invocation, recorder, and the final partial slice.
+  specialized executor, which `build` returns directly.
+  `SimulationRuntime::run()` owns the outer macro-step loop: it takes a due
+  `Action` from `ControlChannel` at each loop top (pacing and deferred
+  commands), executes it while it owns the core, calls `SimulatorCore::step()`
+  for one configured step when Running, publishes the completed step time, and
+  then flushes and finalizes through the channel epilogue. Every exit path
+  (pre-init failure, pre-run cancellation, normal or error exit) closes the
+  channel before the recorder flush. The synchronous `SimulatorCore`
+  owns stepping, graph invocation, recorder, and the final partial step.
 - **la2 is a factory, not a class.** There is no `La2Scheduler` type;
   `make_la2_stack(nodes, La2Options)` (`executor/loop_aware/la2_builder.hpp`)
   is a config-free, pure construction function that SCC-partitions the graph,
@@ -188,8 +216,8 @@ Reusable building blocks that serve la2 but live outside it:
   sub-steps); `GeometricSubstepExecutor` owns its schedule construction
   (`build_schedule` static). Both sweep the group in parallel per sub-step; use
   them outside la2 to sub-step groups on equal or shrinking schedules. They
-  take no pacing parameter: the runner's outer loop owns pacing via
-  `RunControl::before_slice()`.
+  take no pacing parameter: the runtime's outer loop owns pacing via
+  `ControlChannel::wait_for_work()` and the `PacingClock` deadline.
   `LinearSubstepExecutor` requires `iterations` >= 1 (its constructor throws on
   0); `GeometricSubstepExecutor` requires a factor in (0, 1) and shrinks each
   sub-step by `factor` until the remaining time is at or below its absolute

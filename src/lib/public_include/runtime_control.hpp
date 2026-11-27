@@ -66,7 +66,7 @@ namespace ssp4sim
     };
 
     /// Immutable per-run identity: a stable session id and the artifacts this
-    /// run records, in sink order. Valid after SimulationStepper::init().
+    /// run records, in sink order. Valid after SimulatorCore::init().
     struct RunIdentity
     {
         std::string session_id;

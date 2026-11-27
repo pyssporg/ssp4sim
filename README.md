@@ -2,7 +2,7 @@
 <!-- Layer: 00-intent, 01-product, 05-operation, 03-implementation -->
 
 
-SSP4SIM is a C++23 simulation engine for SSP archives with local database result artifacts, CSV export, runtime control (pause/resume/stop and speed), and a local control daemon (`ssp4simd`). Variable overrides are planned/deferred and not in current releases. See [breakdown/00-intent/purpose.md](docs/breakdown/00-intent/purpose.md) for the full project purpose.
+SSP4SIM is a C++23 simulation engine for SSP archives with local database result artifacts, CSV export, runtime control (pause/resume/stop, reset, and speed), mid-run snapshot/restore, and a local control daemon (`ssp4simd`). Variable overrides are planned/deferred and not in current releases. See [breakdown/00-intent/purpose.md](docs/breakdown/00-intent/purpose.md) for the full project purpose.
 
 See [breakdown/01-product/capabilities.md](docs/breakdown/01-product/capabilities.md) for the full capabilities list.
 
@@ -58,8 +58,8 @@ sim.init()
 sim.simulate()
 ```
 
-`Simulator` also exposes `start()`, `pause()`, `resume()`, `stop()`,
-`set_speed()`, `info()`, and `wait()`; `start()` blocks until the run
+`Simulator` also exposes `start()`, `pause()`, `resume()`, `reset()`, `stop()`,
+`set_speed()`, `snapshot()`, `restore()`, `info()`, and `wait()`; `start()` blocks until the run
 is running or terminal, and `simulate()` remains `start()` followed by `wait()`.
 `info()` is the sole read-back and returns one coherent
 `state`/`sim_time_ns`/`speed` reading. Variable

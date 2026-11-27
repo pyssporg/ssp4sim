@@ -19,13 +19,13 @@ The suite is split by layer so each test has a clear responsibility:
 
 - `tests/lib/core/`: C++ tests for core runtime primitives such as FMU adapter,
   recorder, ring buffer, signal storage, start values, and SQLite recording.
-- `tests/lib/control/`: C++ unit tests for the runtime-control state machine
-  (`test_run_control`).
+- `tests/lib/control/`: C++ unit tests for the `ControlChannel` action queue and pacing
+  (`test_control_channel`).
 - `tests/lib/utils/`: C++ tests for utility data structures and support code.
 - `tests/lib/high_level/`: C++ smoke tests through the public simulator entry
   point, including CSV recording and the threaded C ABI control surface
-  (`test_c_api_control.cpp`) and the synchronous C ABI stepper surface
-  (`test_stepper_c_api.cpp`).
+  (`test_c_api_control.cpp`) and the synchronous SimulatorCore C ABI surface
+  (`test_simulator_core_c_api.cpp`).
 - `tests/python/high_level/`: Python API tests for full SSP workflows,
   result-file validation, and implemented runtime control
   (`test_runtime_control.py`).
@@ -118,10 +118,10 @@ same way.
 
 | Tier | Directory | Test files |
 |------|-----------|------------|
-| T1 kernel/units | `tests/lib/core/`, `tests/lib/utils/`, `tests/lib/control/` | `test_mpsc_event_queue`, `test_node`, `test_node_iterator`, `test_ring_buffer`, `test_config`, `test_thread_pool`, `test_run_control` |
+| T1 kernel/units | `tests/lib/core/`, `tests/lib/utils/`, `tests/lib/control/` | `test_mpsc_event_queue`, `test_node`, `test_node_iterator`, `test_ring_buffer`, `test_config`, `test_thread_pool`, `test_control_channel` |
 | T2 parser | `tests/lib/core/` | `test_parameter_binding`, `test_schema_extensions`, `test_signal_storage`, `test_ssp_elements`, `test_start_value` |
 | T3 analysis/graph | `tests/lib/analysis/`, `tests/lib/core/` | `test_graph_builder`, `test_ssp_node`, `test_tree_builder`, `test_parameter_binding_integration` |
-| T4 integration | `tests/lib/high_level/`, `tests/lib/core/`, `tests/lib/graph/`, `tests/lib/model/`, `tests/lib/simulation/` | retained in `ssp4sim_tests`; includes `test_c_api_control.cpp` and `test_stepper_c_api.cpp` |
+| T4 integration | `tests/lib/high_level/`, `tests/lib/core/`, `tests/lib/graph/`, `tests/lib/model/`, `tests/lib/simulation/` | retained in `ssp4sim_tests` or standalone (`test_snapshot`, `test_simulator_core_c_api`); includes `test_c_api_control.cpp` and `test_simulator_core_c_api.cpp` |
 
 `src/public/ssp4sim_server/test_ndjson.cpp` is a separate CTest target
 (`ssp4simd_ndjson`) built with `SSP4SIM_BUILD_TEST`; it is not part of the
@@ -166,10 +166,14 @@ directory that directly contains `SystemStructure.ssd` (e.g.
 Model-exchange fixtures are excluded because the current runtime only supports
 co-simulation FMUs.
 
-CI runs each reference model in its own pytest process: prebuilt FMUs from
-different vendors are not safe to load in one interpreter across models, and a
-later sweep model crashes in its `libstdc++` locale path after an earlier FMU
-has been loaded.
+The sweep auto-isolates each reference model in a subprocess whenever pytest
+collects more than one test item, so `pytest tests/python` is safe; CI still
+runs each model in its own process. The root cause remains external: prebuilt
+FMUs from different vendors are not safe to load in one interpreter across
+models, and a later sweep model crashes in its `libstdc++` locale path after an
+earlier FMU has been loaded. The `CsvSource.so` vendor FMU in
+`pyfmi_csv_source_sink` statically links libstdc++ and pollutes the process
+locale state before a later Hopsan FMU loads.
 
 Two fixtures are known hard failures in the sweep and are pinned as strict
 `xfail`s in `test_reference_sweep.py`:
@@ -250,16 +254,16 @@ root cause.
 
 Runtime control is covered at four levels:
 
-- `tests/lib/control/` exercises the `RunControl` state machine without a full
+- `tests/lib/control/` exercises the `ControlChannel` queue without a full
   simulation, including terminal monotonicity, pre-run teardown, and `RunInfo`
   coherence.
 - `tests/lib/high_level/test_c_api_control.cpp` drives lifecycle, speed,
   coherent `info`, and the result-returning `wait` through the C ABI (retained in
   `ssp4sim_tests`).
-- `tests/lib/high_level/test_stepper_c_api.cpp` drives the synchronous stepper
+- `tests/lib/high_level/test_simulator_core_c_api.cpp` drives the synchronous SimulatorCore
   C ABI (`create`, `init`, `start`, `step`, exact `advance_to`, `get_info`,
   `finish`, `destroy`), including invalid arguments, pre-init transitions, and a
-  zero timestep (retained in `ssp4sim_tests`).
+  zero timestep (standalone `test_simulator_core_c_api`).
 - `tests/python/high_level/test_runtime_control.py` drives the Python
   `Simulator` control surface, including the blocking `start()`, the `wait()`
   result string, and the coherent `info()` read-back, and

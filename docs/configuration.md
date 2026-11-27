@@ -133,6 +133,12 @@ Notes:
 | `simulation.recording.record_inputs` | `bool` | No | `false` | When `true`, input signal values are recorded alongside output signals in CSV artifacts. Input storage has 10 slots; at the default recording interval (0 = every timestep), simulations with more than 10 steps may overflow the input buffer and silently drop events. |
 | `simulation.recording.record_derivatives` | `bool` | No | `false` | When `true`, exported signals gain one column per reserved derivative order (`.d1`, `.d2`, …) alongside the value, for both CSV and SQLite sinks. Derivative slots are only reserved for models declaring `maxOutputDerivativeOrder > 0`; signals without them produce no extra columns. Useful for verifying that forward-derivative values are anchored to the correct timestep. |
 
+### `simulation.snapshot.*`
+
+| Key | Type | Required | Default | Notes |
+|---|---|---|---|---|
+| `simulation.snapshot.directory` | `string` | No | *unset* | Optional checkpoint root for the control daemon. When set, `snapshot` and `restore` paths must resolve inside it; the daemon rejects a path outside with `bad_value`. Paths are canonicalized first, so `..` and symlinks that escape the directory are rejected. An empty or absent value permits any path. |
+
 ### `simulation.log.*`
 
 | Key | Type | Required | Default | Notes |

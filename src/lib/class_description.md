@@ -1,19 +1,23 @@
 classDiagram
 
 class Simulator {
-    Public compatibility facade over ThreadedRunner: owns setup, control, and query access; start() blocks until running or terminal.
+    Caller-facing facade and sole action producer: retains the creation config, posts Start/Pause/Resume/Stop/SetSpeed/Snapshot through SimulationRuntime's ControlChannel, and reads status through it. snapshot() returns bool; restore and reset rebuild through the private factories via the internal detail::RebuildAccess helper.
 }
 
-class ThreadedRunner {
-    Owns the only async layer: worker thread, command queue, pacing, RunState including Stopping, start barrier, wait, and terminal result. Drives SimulationStepper and RunControl.
+class SimulatorCore {
+    Synchronous core: owns SSP import, graph, executors, recorder, simulation time, snapshot save/load, and one macro step; no thread, pacing, RunState, or command queue.
 }
 
-class SimulationStepper {
-    Synchronous core: owns SSP import, graph, executors, recorder, simulation time, and one macro step; no thread, pacing, RunState, or command queue.
+class SimulationRuntime {
+    Owns the simulation side: the synchronous SimulatorCore, the run thread and future with a separate lifecycle mutex, the outer macro-step loop, and the single ControlChannel queue/status object; it consumes and applies actions and publishes state, and never posts.
 }
 
-class RunControl {
-    Single owner of the run-control state machine: one mutex guards the plain state, time, speed, and pacing fields, and one ordered command queue.
+class ControlChannel {
+    Single shared object between caller and run thread: one mutex and one condition variable guard RunState, simulation time, speed, the applied sequence, the last error, and one time-ordered multimap of Start/Pause/Resume/Stop/SetSpeed/Snapshot Actions, plus a closed flag. Only the runtime writes RunState; the Simulator is the only producer. post() is fire-and-forget and post_and_wait() blocks for the applied result and is the only path that keeps a completion record.
+}
+
+class PacingClock {
+    Stores speed and wall/simulation anchors and computes pure pacing deadlines; it owns no lock and no simulation time.
 }
 
 class FmuHandler {
@@ -77,14 +81,15 @@ class SignalStorage {
     Allocates contiguous memory areas and metadata for stored signals.
 }
 
-Simulator *-- ThreadedRunner
-ThreadedRunner *-- RunControl
-ThreadedRunner *-- SimulationStepper
-SimulationStepper *-- FmuHandler
-SimulationStepper *-- DataRecorder
-SimulationStepper *-- Graph
-SimulationStepper *--  GraphBuilder
-SimulationStepper *--  AnalysisGraphBuilder
+Simulator *-- SimulationRuntime
+SimulationRuntime *-- ControlChannel
+SimulationRuntime *-- PacingClock
+SimulationRuntime *-- SimulatorCore
+SimulatorCore *-- FmuHandler
+SimulatorCore *-- DataRecorder
+SimulatorCore *-- Graph
+SimulatorCore *--  GraphBuilder
+SimulatorCore *--  AnalysisGraphBuilder
 AnalysisGraph --> GraphBuilder
 
 FmuHandler *-- "many" FmuInfo

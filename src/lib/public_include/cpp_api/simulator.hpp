@@ -2,8 +2,10 @@
 
 #include "runtime_control.hpp"
 #include "shared_config.hpp"
+#include "simulator_core.hpp"
 
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <string>
@@ -12,17 +14,29 @@
 namespace ssp4sim
 {
     struct SimulatorPrivate;
+    class Simulator;
+
+    namespace runtime
+    {
+        struct Action;
+    }
+
+    namespace detail
+    {
+        struct RebuildAccess;
+    }
 
     /**
-     * @brief A high-level simulator class that simplifies the process of running
-     * a simulation.
+     * @brief Caller-facing facade for one simulation session.
      *
-     * This class is the public compatibility facade over ThreadedRunner.
-     * ThreadedRunner owns the run thread, command queue, pacing, RunState and
-     * terminal result; it drives the synchronous SimulationStepper, which owns
-     * setup, the graph, executors, recorder and one macro step. Setup, queries
-     * and control are forwarded unchanged. info() is the sole public readback
-     * of run state, simulation time and speed.
+     * Simulator owns only the creation config and an internal
+     * runtime::SimulationRuntime. The runtime owns the synchronous
+     * SimulatorCore, the run thread and the outer macro-step loop; the control
+     * channel is the barrier between the caller and the loop. Start-up, queries
+     * and control are owned directly. info() is the sole public readback of run
+     * state, simulation time and speed. snapshot() is one blocking action on
+     * the control channel; no snapshot service or correlation state lives in
+     * the library.
      */
 
 
@@ -64,8 +78,9 @@ namespace ssp4sim
          */
         void simulate();
 
-        /// Spawn the run thread and wait until RunControl leaves Initialized
-        /// (Running or terminal). One run per Simulator; a second call throws.
+        /// Spawn the run thread and wait until the control channel leaves
+        /// Initialized (Running or terminal). One run per Simulator; a second
+        /// call throws.
         void start();
 
         /// Pause a Running run. Invalid state throws std::logic_error.
@@ -80,6 +95,11 @@ namespace ssp4sim
         /// `at_sim_time_ns` defers the stop to that simulation time.
         void stop(std::optional<uint64_t> at_sim_time_ns = std::nullopt);
 
+        /// Unconditional teardown; never throws. Running/Paused -> Stopping,
+        /// Stopping stays Stopping, Created/Initialized -> Stopped (pre-run
+        /// cancellation), terminal states are left untouched.
+        void shutdown() noexcept;
+
         /// Set the wall-clock pace (finite, >= 0). 0 runs as fast as possible.
         /// `at_sim_time_ns` defers the change to that simulation time.
         void set_speed(double speed,
@@ -89,15 +109,46 @@ namespace ssp4sim
         /// read together so the three values agree.
         RunInfo info() const;
 
-        /// Block until the run leaves Initialized (Running or terminal). Used
-        /// as the start barrier so a start->stop sequence cannot observe a
-        /// pre-run state.
-        void wait_until_started();
+        /// Immutable identity of the current session: stable session id and
+        /// recorded artifacts. Valid after init(); reflects the rebuilt session
+        /// after reset() or restore().
+        RunIdentity run_identity() const;
+
+        /// Blocking snapshot of a Running or Paused run. Returns true when the
+        /// file was written, false outside Running/Paused or when the save
+        /// fails; the failure reason is logged.
+        bool snapshot(const std::filesystem::path &path);
+
+        /// Blocking restore of \p path into a freshly initialized run. Prior
+        /// control states are stopped and joined first; the new run keeps the
+        /// current pace. After this call the Simulator is Initialized (or
+        /// Running when \p start is true): a subsequent init() is invalid.
+        void restore(const std::filesystem::path &path, bool start = true);
+
+        /// Stop and join any current run, discard all per-run state, and
+        /// rebuild a fresh initialized run from the creation config. Leaves the
+        /// Simulator Initialized at the configured start time; a subsequent
+        /// init() is invalid. Throws if construction or initialization fails.
+        void reset();
 
         /// Wait for the run to finish; idempotent, rethrows on failure.
         RunResult wait();
 
     private:
+        friend struct detail::RebuildAccess;
+
+        void submit_and_wait(runtime::Action action);
+        std::string shutdown_report() noexcept;
+
+        /// Construct, init(), and (for restored) load a snapshot. Used by
+        /// rebuild(); no threads or run control are involved.
+        static std::unique_ptr<Simulator> create_initialized(SharedConfig config);
+        static std::unique_ptr<Simulator> create_restored(
+            SharedConfig config, const std::filesystem::path &path);
+
+        static SharedConfig prepare_restore_config(SharedConfig config,
+                                                   double prior_speed);
+
         std::unique_ptr<SimulatorPrivate> p;
     };
 }

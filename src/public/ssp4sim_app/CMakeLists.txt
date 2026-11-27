@@ -22,6 +22,8 @@ if(GIT_FOUND)
   endif()
 endif()
 
+target_include_directories(sim_app PRIVATE ${CMAKE_SOURCE_DIR}/src/lib/include)
+
 target_compile_options(sim_app PRIVATE -Wfatal-errors)
 target_compile_definitions(sim_app PRIVATE SSP4SIM_APP_VERSION="${SSP4SIM_APP_VERSION}")
 

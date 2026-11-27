@@ -5,8 +5,10 @@
 #include "cpp_api/simulator.hpp"
 
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 
 // The C enums must stay numerically identical to the canonical C++ enums in
@@ -159,6 +161,14 @@ ssp4sim_status ssp4sim_simulator_resume(ssp4sim_simulator_handle *handle)
         [](ssp4sim::Simulator &simulator) { simulator.resume(); });
 }
 
+ssp4sim_status ssp4sim_simulator_reset(ssp4sim_simulator_handle *handle)
+{
+    return call_simulator(
+        handle,
+        "resetting simulator",
+        [](ssp4sim::Simulator &simulator) { simulator.reset(); });
+}
+
 ssp4sim_status ssp4sim_simulator_stop(ssp4sim_simulator_handle *handle, int has_at_sim_time,
                            uint64_t at_sim_time_ns)
 {
@@ -182,6 +192,47 @@ ssp4sim_status ssp4sim_simulator_set_speed(ssp4sim_simulator_handle *handle, dou
         {
             simulator.set_speed(
                 speed, to_at_sim_time(has_at_sim_time, at_sim_time_ns));
+        });
+}
+
+ssp4sim_status ssp4sim_simulator_snapshot(ssp4sim_simulator_handle *handle,
+                                          const char *path)
+{
+    if (path == nullptr)
+    {
+        return set_error(
+            SSP4SIM_STATUS_INVALID_ARGUMENT,
+            "path must not be null");
+    }
+
+    return call_simulator(
+        handle,
+        "taking snapshot",
+        [path](ssp4sim::Simulator &simulator)
+        {
+            if (!simulator.snapshot(std::filesystem::path(path)))
+            {
+                throw std::runtime_error("snapshot failed");
+            }
+        });
+}
+
+ssp4sim_status ssp4sim_simulator_restore(ssp4sim_simulator_handle *handle,
+                                         const char *path, int start)
+{
+    if (path == nullptr)
+    {
+        return set_error(
+            SSP4SIM_STATUS_INVALID_ARGUMENT,
+            "path must not be null");
+    }
+
+    return call_simulator(
+        handle,
+        "restoring snapshot",
+        [path, start](ssp4sim::Simulator &simulator)
+        {
+            simulator.restore(std::filesystem::path(path), start != 0);
         });
 }
 

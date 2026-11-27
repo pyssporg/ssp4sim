@@ -1,4 +1,4 @@
-#include "stepper.hpp"
+#include "simulator_core.hpp"
 
 #include "ssp4cpp/ssp.hpp"
 #include "ssp4cpp/utils/log.hpp"
@@ -6,6 +6,7 @@
 #include "pre/pre_pipeline.hpp"
 #include "pre/3_simulation_graph/elements/model_fmu.hpp"
 #include "simulation/sim_setup.hpp"
+#include "simulation/snapshot/snapshot.hpp"
 #include "executor/executor_base.hpp"
 
 #include "simulation/signal/sinks/csv_recorder_sink.hpp"
@@ -19,13 +20,19 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
 
 namespace ssp4sim
 {
-    struct SimulationStepper::Impl
+    SnapshotError::SnapshotError(std::string code_value, const std::string &message)
+        : std::runtime_error(message), code(std::move(code_value))
+    {
+    }
+
+    struct SimulatorCore::Impl
     {
         ssp4cpp::utils::log::Logger *log = nullptr;
 
@@ -49,39 +56,50 @@ namespace ssp4sim
 
         uint64_t sim_time_ns = 0;
 
-        /// Advance one slice bounded by `limit_ns` and end_time. No pacing.
-        StepStatus step_to(uint64_t limit_ns)
+        /// Computed once on the first snapshot call and reused afterwards.
+        std::optional<std::string> ssp_fingerprint;
+
+        const std::string &ensure_ssp_fingerprint()
+        {
+            if (!ssp_fingerprint)
+            {
+                ssp_fingerprint = snapshot::fingerprint(conf->ssp_path);
+            }
+            return *ssp_fingerprint;
+        }
+
+        /// Advance one step bounded by `limit_ns` and end_time. No pacing.
+        bool step_to(uint64_t limit_ns)
         {
             const uint64_t end_time = conf->fmu.end_time;
 
             if (sim_time_ns >= end_time)
             {
-                return StepStatus::Completed;
+                return true;
             }
 
             if (limit_ns <= sim_time_ns)
             {
-                return StepStatus::Advanced;
+                return false;
             }
 
-            uint64_t slice_end = sim_time_ns + conf->fmu.timestep;
-            slice_end = std::min(slice_end, limit_ns);
-            slice_end = std::min(slice_end, end_time);
+            uint64_t step_end = sim_time_ns + conf->fmu.timestep;
+            step_end = std::min(step_end, limit_ns);
+            step_end = std::min(step_end, end_time);
 
-            simulation_node->invoke(graph::StepData(sim_time_ns, slice_end));
-            sim_time_ns = slice_end;
+            simulation_node->invoke(graph::StepData(sim_time_ns, step_end));
+            sim_time_ns = step_end;
 
-            return sim_time_ns >= end_time ? StepStatus::Completed
-                                           : StepStatus::Advanced;
+            return sim_time_ns >= end_time;
         }
     };
 
-    SimulationStepper::SimulationStepper(SharedConfig config,
+    SimulatorCore::SimulatorCore(SharedConfig config,
                                          ssp4cpp::utils::log::Logger *log)
         : p(std::make_unique<Impl>())
     {
         p->log = log ? log : config.log;
-        LOG_INFO(p->log, "[{func}] Setting up simulation stepper", __func__);
+        LOG_INFO(p->log, "[{func}] Setting up simulation core", __func__);
 
         LOG_DEBUG(p->log, "[{func}] - Config loaded", __func__);
 
@@ -153,18 +171,18 @@ namespace ssp4sim
         p->sim_time_ns = p->conf->fmu.start_time;
     }
 
-    SimulationStepper::~SimulationStepper() = default;
+    SimulatorCore::~SimulatorCore() = default;
 
-    bool SimulationStepper::initialized() const noexcept
+    bool SimulatorCore::initialized() const noexcept
     {
         return p->initialized;
     }
 
-    void SimulationStepper::init()
+    void SimulatorCore::init()
     {
         if (p->initialized)
         {
-            throw std::logic_error("SimulationStepper::init() called twice");
+            throw std::logic_error("SimulatorCore::init() called twice");
         }
 
         LOG_INFO(p->log, "[{func}] Initializing simulation", __func__);
@@ -189,29 +207,29 @@ namespace ssp4sim
         p->initialized = true;
     }
 
-    RunIdentity SimulationStepper::run_identity() const
+    RunIdentity SimulatorCore::run_identity() const
     {
         return p->identity;
     }
 
-    void SimulationStepper::start()
+    void SimulatorCore::start()
     {
         if (!p->initialized)
         {
             throw std::logic_error(
-                "SimulationStepper::start() called before init()");
+                "SimulatorCore::start() called before init()");
         }
 
         if (p->started || p->finished)
         {
             throw std::logic_error(
-                "SimulationStepper::start() called more than once");
+                "SimulatorCore::start() called more than once");
         }
 
         if (p->conf->fmu.timestep == 0)
         {
             throw std::runtime_error(
-                "SimulationStepper::start(): simulation.timestep must be greater than zero");
+                "SimulatorCore::start(): simulation.timestep must be greater than zero");
         }
 
         if (p->recorder)
@@ -222,28 +240,28 @@ namespace ssp4sim
         p->started = true;
     }
 
-    StepStatus SimulationStepper::step()
+    bool SimulatorCore::step()
     {
         if (!p->started || p->finished)
         {
             throw std::logic_error(
-                "SimulationStepper::step() called before start() or after finish()");
+                "SimulatorCore::step() called before start() or after finish()");
         }
 
         if (p->sim_time_ns >= p->conf->fmu.end_time)
         {
-            return StepStatus::Completed;
+            return true;
         }
 
         return p->step_to(p->sim_time_ns + p->conf->fmu.timestep);
     }
 
-    StepStatus SimulationStepper::advance_to(uint64_t target_ns)
+    bool SimulatorCore::advance_to(uint64_t target_ns)
     {
         if (!p->started || p->finished)
         {
             throw std::logic_error(
-                "SimulationStepper::advance_to() called before start() or after finish()");
+                "SimulatorCore::advance_to() called before start() or after finish()");
         }
 
         const uint64_t end_time = p->conf->fmu.end_time;
@@ -254,32 +272,73 @@ namespace ssp4sim
 
         if (p->sim_time_ns >= end_time)
         {
-            return StepStatus::Completed;
+            return true;
         }
 
         while (p->sim_time_ns < target_ns)
         {
-            const StepStatus status = p->step_to(target_ns);
-            if (status == StepStatus::Completed)
+            if (p->step_to(target_ns))
             {
-                return status;
+                return true;
             }
         }
 
-        return StepStatus::Advanced;
+        return false;
     }
 
-    uint64_t SimulationStepper::sim_time_ns() const noexcept
+    uint64_t SimulatorCore::sim_time_ns() const noexcept
     {
         return p->sim_time_ns;
     }
 
-    uint64_t SimulationStepper::end_time_ns() const noexcept
+    uint64_t SimulatorCore::end_time_ns() const noexcept
     {
         return p->conf ? p->conf->fmu.end_time : 0;
     }
 
-    void SimulationStepper::finish()
+    bool SimulatorCore::save_snapshot(const std::filesystem::path &path)
+    {
+        if (!p->initialized)
+        {
+            throw std::logic_error(
+                "SimulatorCore::save_snapshot() called before init()");
+        }
+
+        snapshot::Context context;
+        context.conf = p->conf.get();
+        context.graph = &p->sim_graph;
+        context.sim_time_ns = &p->sim_time_ns;
+        context.fingerprint = &p->ensure_ssp_fingerprint();
+
+        (void)snapshot::save(context, path);
+        return true;
+    }
+
+    void SimulatorCore::load_snapshot(const std::filesystem::path &path)
+    {
+        if (!p->initialized)
+        {
+            throw std::logic_error(
+                "SimulatorCore::load_snapshot() called before init()");
+        }
+
+        if (p->started || p->finished)
+        {
+            throw std::logic_error(
+                "SimulatorCore::load_snapshot() requires an initialized, "
+                "unstarted, unfinished core");
+        }
+
+        snapshot::Context context;
+        context.conf = p->conf.get();
+        context.graph = &p->sim_graph;
+        context.sim_time_ns = &p->sim_time_ns;
+        context.fingerprint = &p->ensure_ssp_fingerprint();
+
+        snapshot::load(context, path);
+    }
+
+    void SimulatorCore::finish()
     {
         if (p->finished)
         {
@@ -296,7 +355,7 @@ namespace ssp4sim
         }
     }
 
-    void SimulationStepper::log_model_walltimes() const
+    void SimulatorCore::log_model_walltimes() const
     {
         uint64_t total_model_time = 0;
 

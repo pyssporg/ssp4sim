@@ -41,4 +41,5 @@ summary: Closed improvements — a lookup of what was done, never a backlog
 - **IMP-041** [Integration test for external SSV/SSM loading](IMP-041.md) — Add ssp4sim-layer integration tests that load real SSP archives and verify external/inline parameter binding resolution
 - **IMP-042** [Nested system graph support](IMP-042.md) — Resolve boundary-crossing connections with path-prefixed model naming so hierarchical SSPs simulate end-to-end
 - **IMP-044** [Refactor test_sim_graph_builder.cpp](IMP-044.md) — Extract helpers, fix test gaps, and clarify scope in the ConnectionInfo/ConnectorInfo test file
+- **IMP-055** [Mid-run FMU state snapshot and restore through the daemon](mid-run-fmu-state-snapshot-and-restore-through-the-daemon.md) — Persist FMI state, signal rings, resolver frontiers, and time to one checksummed file; restore into a fresh session from the daemon or the public API
 <!-- pb:index:end -->

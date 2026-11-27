@@ -82,6 +82,11 @@ namespace ssp4sim
 
         std::filesystem::path working_dir = "./wd/default";
 
+        // Optional path policy for checkpoint files. Empty means any path is
+        // allowed; when set, `snapshot`/`restore` only accept paths inside it.
+        // Parsed from `simulation.snapshot.directory`.
+        std::optional<std::filesystem::path> snapshot_dir;
+
         // Executor selection and tuning, and model-level parameters (owns the
         // experiment times). Both are the single parse site for their slices.
         ExecutorOptions executor;
