@@ -14,24 +14,41 @@ For detailed architecture information, see the [architecture layer](breakdown/02
 
 ## Control Modules
 
-Runtime control is split between the synchronous core and the threaded runner:
+Runtime control has three roles across two folders: the caller-facing facade,
+the single locked run queue/status object, and the internal simulation side.
 
-- `src/lib/public_include/cpp_api/simulator.hpp`: threaded C++ facade
-  (`Simulator`).
-- `src/lib/public_include/cpp_api/stepper.hpp`: synchronous C++ core
-  (`SimulationStepper`).
+- **Caller facade** — `src/lib/public_include/cpp_api/simulator.hpp`:
+  `Simulator` is the caller-facing facade. It owns only the creation config and
+  delegates `init`, `start`, `simulate`, `pause`, `resume`, `stop`,
+  `set_speed`, `info`, `snapshot`, `wait`, `shutdown`, and `reset` to its
+  internal runtime. `restore`, `reset`, and the daemon's `Simulator::rebuild`
+  build replacements through the private
+  `create_initialized`/`create_restored` factories.
+- **Run queue** — `src/lib/include/simulation/runtime/run_control.{hpp,cpp}`:
+  `RunControl` is the only shared interface between the caller and the run
+  thread. One mutex and one condition variable guard the lifecycle state,
+  `PacingClock` (simulation time, speed, pacing anchors, deadline math), and
+  one time-ordered queue of commands and `RunThreadTask` work. There is no
+  separate queue type: enqueue-vs-close, state reads, and wakeups all happen
+  under that one lock. `RunControl::info()` is the status readback
+  (`RunInfo`). The blocking `SimulationRuntime::snapshot` posts a private
+  `SnapshotWork : RunThreadTask` here.
+- **Simulation side** — same folder:
+  `SimulationRuntime` owns the synchronous `SimulatorCore`, the run thread,
+  run mutex/future, and the outer macro-step loop. At each loop top it calls
+  `RunControl::next_action()`, runs queued work, steps the core, publishes
+  time, and finalizes through `RunControl::finish()`; it implements `run()`,
+  `start()`, `wait()`, `shutdown()`, `snapshot()`, and `load_snapshot()`.
+- `src/lib/public_include/cpp_api/simulator_core.hpp`: synchronous C++ core
+  (`SimulatorCore`), which owns `save_snapshot`/`load_snapshot`.
 - `src/lib/public_include/c_api/`: threaded and synchronous C ABIs plus the
   shared status/error header.
-- `src/lib/include/simulation/runner/threaded_runner.*`: the only async layer
-  (run thread, command queue, pacing, `RunState`, `wait`).
-- `src/lib/include/simulation/control/`: `RunControl` state machine, command
-  queue, and run state.
 - `src/lib/public_include/runtime_control.hpp`: public state/result enums,
   shared by the C++, C, and Python surfaces.
 - `src/public/ssp4sim_server/`: the `ssp4simd` frontend (`daemon`, Unix-domain
   socket `server`, NDJSON framing and `protocol`). It links the engine and adds
   no listening network port to the engine.
-- `tests/lib/control/`: unit tests for the control state machine.
+- `tests/lib/control/`: unit tests for `RunControl` (queue, state machine, pacing).
 
 Variable overrides are planned/deferred and are not in current releases.
 
@@ -95,8 +112,8 @@ defaults for keys read from `utils::Config`.
 ## Executor Stacks And The Single-Resolver Rule
 
 Executors nest: `ExecutorBase` is an `Invocable` whose children may themselves be
-executors (e.g. `SerialSeidel -> LinearSubstepExecutor -> FmuModel`). The
-threaded runner owns the outer macro-step loop. When composing a stack:
+executors (e.g. `SerialSeidel -> LinearSubstepExecutor -> FmuModel`). `Simulator`
+owns the outer macro-step loop. When composing a stack:
 
 - **Configuration is parsed once, centrally; options are nested.** The
   `SharedConfig::from_file/from_string/from_json` factories and
@@ -124,12 +141,16 @@ threaded runner owns the outer macro-step loop. When composing a stack:
   scans the registry and requires *exactly one* matching variant — no
   per-family branching: none match is a precise no-match error naming the
   method, more than one is an ambiguity error. The resolved factory builds the
-  specialized executor, which `build` returns directly. `ThreadedRunner::run()`
-  owns the outer macro-step loop: it calls `RunControl::before_slice()` at each
-  slice top (pacing and due commands), calls `SimulationStepper::step()` for one
-  configured slice, publishes the completed boundary, and then flushes and
-  finalizes through `RunControl::finish()`. The synchronous `SimulationStepper`
-  owns slicing, graph invocation, recorder, and the final partial slice.
+  specialized executor, which `build` returns directly.
+  `SimulationRuntime::run()` owns the outer macro-step loop: it calls
+  `RunControl::next_action()` at each
+  step top (pacing and due commands), executes run work while it owns the
+  core, calls `SimulatorCore::step()` for one configured step, publishes
+  the completed step time, and then flushes and finalizes through
+  `RunControl::finish()`. Every exit path (pre-init failure, pre-run
+  cancellation, normal or error exit) shares one epilogue that closes run
+  work once before the recorder flush. The synchronous `SimulatorCore`
+  owns stepping, graph invocation, recorder, and the final partial step.
 - **la2 is a factory, not a class.** There is no `La2Scheduler` type;
   `make_la2_stack(nodes, La2Options)` (`executor/loop_aware/la2_builder.hpp`)
   is a config-free, pure construction function that SCC-partitions the graph,
@@ -189,7 +210,7 @@ Reusable building blocks that serve la2 but live outside it:
   (`build_schedule` static). Both sweep the group in parallel per sub-step; use
   them outside la2 to sub-step groups on equal or shrinking schedules. They
   take no pacing parameter: the runner's outer loop owns pacing via
-  `RunControl::before_slice()`.
+  `RunControl::next_action()`.
   `LinearSubstepExecutor` requires `iterations` >= 1 (its constructor throws on
   0); `GeometricSubstepExecutor` requires a factor in (0, 1) and shrinks each
   sub-step by `factor` until the remaining time is at or below its absolute

@@ -189,6 +189,29 @@ def test_simulate_releases_gil_for_pause(tmp_path: Path) -> None:
     assert simulator.info()["state"] == "completed"
 
 
+def test_reset_rebuilds_initialized_run(tmp_path: Path) -> None:
+    ssp_root = fixture_ssp_root()
+    config_path = write_config(
+        ssp_root,
+        tmp_path / "reset",
+        stop_time=0.2,
+        timestep=0.05,
+        speed=1.0,
+    )
+
+    simulator = pyssp4sim.Simulator(str(config_path))
+    simulator.init()
+    simulator.start()
+    wait_for_state(simulator, "running")
+
+    simulator.reset()
+    assert simulator.info()["state"] == "initialized"
+    assert simulator.info()["sim_time_ns"] == 0
+
+    simulator.start()
+    assert simulator.wait() == "completed"
+
+
 def test_info_tracks_the_run(tmp_path: Path) -> None:
     ssp_root = fixture_ssp_root()
     config_path = write_config(

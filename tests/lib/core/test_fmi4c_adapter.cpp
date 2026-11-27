@@ -90,6 +90,25 @@ TEST_CASE("FmuInstance loads FMI 2.0 co-simulation FMUs", "[fmi4c_adapter]")
 }
 
 // ---------------------------------------------------------------------------
+// Description: Verifies FMU state capability getters and cached metadata
+// Rationale:   Discovery surface for mid-run snapshot/restore support
+// ---------------------------------------------------------------------------
+TEST_CASE("FmuInstance exposes FMU state capabilities and metadata", "[fmi4c_adapter]")
+{
+    auto fmu_path = scenario_fmu_path();
+    FmuInstance instance(fmu_path, "state-capability-instance");
+
+    const bool can_get_and_set = instance.can_get_and_set_state();
+    const bool can_serialize = instance.can_serialize_state();
+    INFO("can_get_and_set_state: " << can_get_and_set);
+    INFO("can_serialize_state: " << can_serialize);
+
+    REQUIRE_FALSE(instance.guid().empty());
+    REQUIRE_FALSE(instance.model_identifier().empty());
+    REQUIRE(instance.model_identifier() == "scenario");
+}
+
+// ---------------------------------------------------------------------------
 // Description: Verifies FmuInstance throws on missing/invalid FMU path
 // Rationale:   Error handling — invalid paths must produce clear errors
 // ---------------------------------------------------------------------------
@@ -160,6 +179,73 @@ TEST_CASE("CoSimulationModel runs scenario FMU lifecycle", "[fmi4c_adapter][inte
     REQUIRE(std::isfinite(altitude));
 
     REQUIRE(model.terminate());
+    REQUIRE(model.terminate());
+}
+
+// ---------------------------------------------------------------------------
+// Description: Conditional serialize/restore round trip; a restored snapshot
+//              must reproduce the same trajectory as the original branch
+// Rationale:   Mid-run snapshot/restore correctness with real FMU
+// Creep flag:  Hardcoded value references and scenario schedule string couple
+//              the test to the specific scenario FMU content
+// ---------------------------------------------------------------------------
+TEST_CASE("CoSimulationModel round trips serialized FMU state", "[fmi4c_adapter]")
+{
+    auto fmu_path = scenario_fmu_path();
+    FmuInstance instance(fmu_path, "state-roundtrip-instance");
+
+    if (!instance.can_get_and_set_state() || !instance.can_serialize_state())
+    {
+        SUCCEED("FMU does not support FMU state");
+        return;
+    }
+
+    CoSimulationModel model(instance);
+
+    REQUIRE(model.instantiate(false, false));
+    REQUIRE(model.setup_experiment(0.0, s_to_ns(10.0), 1e-4));
+    REQUIRE(model.enter_initialization_mode());
+    auto scenario_schedule = std::string("Alt;L;0.0,0.0;300.0,10000.0\nMach;L;0.0,0.0;300.0,1.2\nheat_load;ZOH;0.0,50.0;150.0,4000.0\nWgt_On_Whl;ZOH;0.0,1.0;150.0,0.0\nAircraft_state;ZOH;0.0,0.0;150.0,4.0");
+    REQUIRE(model.write_string(0, scenario_schedule));
+    REQUIRE(model.exit_initialization_mode());
+
+    constexpr uint64_t kAltitudeVr = 1;
+    constexpr uint64_t kMachVr = 2;
+    const auto step_size = s_to_ns(0.5);
+
+    for (int i = 0; i < 3; ++i)
+    {
+        REQUIRE(model.step(step_size));
+    }
+
+    double altitude_before = 0.0;
+    double mach_before = 0.0;
+    REQUIRE(model.read_real(kAltitudeVr, altitude_before));
+    REQUIRE(model.read_real(kMachVr, mach_before));
+    REQUIRE(std::isfinite(altitude_before));
+    REQUIRE(std::isfinite(mach_before));
+
+    const auto snapshot_time = model.get_simulation_time();
+    auto snapshot = model.serialize_fmu_state();
+    REQUIRE_FALSE(snapshot.empty());
+
+    REQUIRE(model.step(step_size));
+    double altitude_expected = 0.0;
+    double mach_expected = 0.0;
+    REQUIRE(model.read_real(kAltitudeVr, altitude_expected));
+    REQUIRE(model.read_real(kMachVr, mach_expected));
+
+    model.restore_fmu_state(snapshot);
+    model.set_current_time(snapshot_time);
+    REQUIRE(model.step(step_size));
+    double altitude_actual = 0.0;
+    double mach_actual = 0.0;
+    REQUIRE(model.read_real(kAltitudeVr, altitude_actual));
+    REQUIRE(model.read_real(kMachVr, mach_actual));
+
+    REQUIRE(altitude_actual == Catch::Approx(altitude_expected).epsilon(1e-9).margin(1e-9));
+    REQUIRE(mach_actual == Catch::Approx(mach_expected).epsilon(1e-9).margin(1e-9));
+
     REQUIRE(model.terminate());
 }
 

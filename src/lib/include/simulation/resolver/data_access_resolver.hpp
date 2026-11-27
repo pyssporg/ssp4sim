@@ -3,8 +3,11 @@
 #include "invocable.hpp"
 #include "resolver/resolver_common.hpp"
 
+#include "simulation/serialize/serialize.hpp"
+
 #include <cstddef>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace ssp4sim::graph
@@ -28,7 +31,7 @@ namespace ssp4sim::scheduling
     /// family is decided at construction: the constructor stamps every wired edge
     /// with `default_mode`, and graph-aware schedulers override individual edges
     /// via `stamp_edge_mode()`.
-    class DataAccessResolver
+    class DataAccessResolver : public serialize::ISerialize
     {
     public:
         /// Sentinel for an unlinked edge / unknown (model, connection): no
@@ -51,6 +54,9 @@ namespace ssp4sim::scheduling
         void mark_committed(std::size_t model_id,
                             std::uint64_t output_time,
                             std::size_t area);
+
+        void serialize(serialize::Writer &out) const override;
+        void deserialize(serialize::Reader &in) override;
 
         /// The entire read path for one model: for each incoming connection, call
         /// the resolution hook and copy the source value (and forwarded

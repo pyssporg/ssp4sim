@@ -75,6 +75,38 @@ namespace
         return config_path;
     }
 
+    fs::path write_snapshot_config(const fs::path &workdir)
+    {
+        const auto ssp_root = ssp4sim::tests::reference_ssp::fixture_root("Dahlquist");
+        REQUIRE(fs::exists(ssp_root / "SystemStructure.ssd"));
+
+        fs::create_directories(workdir);
+
+        nlohmann::json config;
+        config["simulation"] = {
+            {"ssp", ssp_root.string()},
+            {"start_time", 0.0},
+            {"stop_time", 2.0},
+            {"timestep", 0.01},
+            {"tolerance", 1e-6},
+            {"speed", 0.1},
+            {"working_dir", workdir.string()},
+            {"executor", {{"method", "jacobi"}, {"forward_derivatives", false}}},
+            {"log", {{"fmu", false},
+                     {"level_terminal", "disable"},
+                     {"level_file", "disable"},
+                     {"level_json", "disable"},
+                     {"level_cutelog", "disable"}}},
+            {"recording", {{"csv", {{"enable", false}}},
+                           {"sqlite", {{"enable", false}}}}}};
+
+        const auto config_path = workdir / "config.json";
+        std::ofstream output(config_path, std::ios::trunc);
+        REQUIRE(output.is_open());
+        output << config.dump(2);
+        return config_path;
+    }
+
     fs::path write_fmu_archive_config(const fs::path &workdir, const fs::path &ssp_archive)
     {
         const auto config_template = ssp4sim::tests::reference_ssp::project_root() / "resources" / "generic_config.json";
@@ -225,6 +257,41 @@ TEST_CASE("Simulator constructs from a SharedConfig (object-first)", "[high_leve
 }
 
 // ---------------------------------------------------------------------------
+// Description: A blocking snapshot writes a live run's state and a blocking
+//              restore replaces the runner and resumes from that state.
+// Rationale:   The in-process facade must expose the same snapshot/restore
+//              surface as the daemon without leaking its lifecycle.
+// ---------------------------------------------------------------------------
+TEST_CASE("Simulator snapshot and restore round-trip", "[high_level][snapshot]")
+{
+    const auto workdir = ssp4sim::tests::reference_ssp::project_root() /
+                         "build" / "test_cpp_high_level" / "snapshot_api";
+    fs::remove_all(workdir);
+    const auto config_path = write_snapshot_config(workdir);
+
+    ssp4sim::Simulator simulator(config_path.string());
+    simulator.init();
+    simulator.start();
+    REQUIRE(simulator.info().state == ssp4sim::RunState::Running);
+
+    const auto snapshot_path = workdir / "state.snap";
+    REQUIRE(simulator.snapshot(snapshot_path));
+    REQUIRE(fs::exists(snapshot_path));
+    REQUIRE(fs::file_size(snapshot_path) > 0);
+    const uint64_t snapshot_sim_time_ns = simulator.info().sim_time_ns;
+
+    simulator.stop();
+    REQUIRE(simulator.wait() == ssp4sim::RunResult::Stopped);
+
+    simulator.restore(snapshot_path, true);
+    REQUIRE(simulator.info().state == ssp4sim::RunState::Running);
+    REQUIRE(simulator.info().sim_time_ns >= snapshot_sim_time_ns);
+
+    simulator.stop();
+    REQUIRE(simulator.wait() == ssp4sim::RunResult::Stopped);
+}
+
+// ---------------------------------------------------------------------------
 // Description: Destroying a Simulator while its run thread is live must stop
 //              and join the run before conf/ssp are released (no UAF).
 // Rationale:   Regression for the SimulatorPrivate destruction-order bug.
@@ -243,7 +310,7 @@ TEST_CASE("Simulator destruction while running joins cleanly", "[high_level][smo
         ssp4sim::Simulator simulator(config);
         simulator.init();
         simulator.start();
-        // start() returns only after RunControl leaves Initialized, so the
+        // start() returns only after the control channel applies Start, so the
         // destructor below exercises the immediate teardown path.
     } // destructor must request stop, wait and join without throwing
 }

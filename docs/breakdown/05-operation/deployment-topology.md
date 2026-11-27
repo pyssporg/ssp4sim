@@ -15,7 +15,7 @@ The product ships as a Linux tarball plus a Python wheel and runs from a filesys
   - `bin/sim_app` — CLI binary.
   - `bin/ssp4simd` — local control daemon.
   - `lib/libssp4sim.a` — static library.
-  - `include/ssp4sim/` — shared public types (runtime_control.hpp, shared_config.hpp), `include/ssp4sim/cpp_api/` (simulator.hpp, stepper.hpp), and `include/ssp4sim/c_api/` (simulator_c_api.h, stepper_c_api.h, c_api_common.h).
+  - `include/ssp4sim/` — shared public types (runtime_control.hpp, shared_config.hpp), `include/ssp4sim/cpp_api/` (simulator.hpp, simulator_core.hpp), and `include/ssp4sim/c_api/` (simulator_c_api.h, simulator_core_c_api.h, c_api_common.h).
   - `python/pyssp4sim-*.whl` — Python wheel.
   - `resources/` — embrace.json under embrace/, generic_config.json.
   - `README.md`, `LICENSE`, `RELEASE.txt`.

@@ -81,6 +81,17 @@ namespace ssp4sim::handler
         }
     }
 
+    static std::string state_failure(const std::string &model, const char *call, fmi2Status status)
+    {
+        auto result = std::format("Model '{}' call '{}' failed with status {}", model, call, status_to_string(status));
+        auto message = detail::consume_last_message();
+        if (!message.empty())
+        {
+            result += std::format(": {}", message);
+        }
+        return result;
+    }
+
     FmuInstance::FmuInstance(const std::filesystem::path &path, std::string instance_name)
         : log(ssp4cpp::utils::log::make_logger("ssp4sim.handler.FmuInstance"))
     {
@@ -110,6 +121,12 @@ namespace ssp4sim::handler
         {
             throw std::runtime_error(std::format("Unsupported FMI version {} for FMU '{}'", static_cast<int>(version_), fmu_path_));
         }
+
+        const char *guid = fmi2_getGuid(handle_);
+        guid_ = guid != nullptr ? guid : "";
+
+        const char *model_identifier = fmi2cs_getModelIdentifier(handle_);
+        model_identifier_ = model_identifier != nullptr ? model_identifier : "";
     }
 
     FmuInstance::~FmuInstance()
@@ -145,6 +162,26 @@ namespace ssp4sim::handler
     const std::string &FmuInstance::instance_name() const
     {
         return instance_name_;
+    }
+
+    bool FmuInstance::can_get_and_set_state() const
+    {
+        return handle_ != nullptr && fmi2cs_getCanGetAndSetFMUState(handle_);
+    }
+
+    bool FmuInstance::can_serialize_state() const
+    {
+        return handle_ != nullptr && fmi2cs_getCanSerializeFMUState(handle_);
+    }
+
+    const std::string &FmuInstance::guid() const
+    {
+        return guid_;
+    }
+
+    const std::string &FmuInstance::model_identifier() const
+    {
+        return model_identifier_;
     }
 
     // CoSimulationModel ----------------------------
@@ -381,6 +418,95 @@ namespace ssp4sim::handler
 
             return false;
         }
+    }
+
+    std::vector<std::byte> CoSimulationModel::serialize_fmu_state()
+    {
+        if (!instantiated_ || handle == nullptr)
+        {
+            throw std::logic_error("serialize_fmu_state called before instantiate");
+        }
+
+        detail::clear_last_message();
+
+        fmi2FMUstate state = nullptr;
+        fmi2Status status = fmi2_getFMUstate(handle, &state);
+        if (!is_status_ok(status))
+        {
+            if (state != nullptr)
+            {
+                fmi2_freeFMUstate(handle, &state);
+            }
+            throw std::runtime_error(state_failure(instance_.instance_name(), "fmi2_getFMUstate", status));
+        }
+
+        size_t size = 0;
+        status = fmi2_serializedFMUstateSize(handle, state, &size);
+        if (!is_status_ok(status))
+        {
+            fmi2_freeFMUstate(handle, &state);
+            throw std::runtime_error(state_failure(instance_.instance_name(), "fmi2_serializedFMUstateSize", status));
+        }
+
+        std::vector<std::byte> buffer(size);
+        status = fmi2_serializeFMUstate(handle, state, reinterpret_cast<fmi2Byte *>(buffer.data()), size);
+        auto free_status = fmi2_freeFMUstate(handle, &state);
+
+        if (!is_status_ok(status))
+        {
+            throw std::runtime_error(state_failure(instance_.instance_name(), "fmi2_serializeFMUstate", status));
+        }
+        if (!is_status_ok(free_status))
+        {
+            throw std::runtime_error(state_failure(instance_.instance_name(), "fmi2_freeFMUstate", free_status));
+        }
+
+        return buffer;
+    }
+
+    void CoSimulationModel::restore_fmu_state(std::span<const std::byte> serialized)
+    {
+        if (!instantiated_ || handle == nullptr)
+        {
+            throw std::logic_error("restore_fmu_state called before instantiate");
+        }
+        if (serialized.empty())
+        {
+            throw std::logic_error("restore_fmu_state called with empty state");
+        }
+
+        detail::clear_last_message();
+
+        fmi2FMUstate state = nullptr;
+        fmi2Status status = fmi2_deSerializeFMUstate(handle,
+                                                     reinterpret_cast<const fmi2Byte *>(serialized.data()),
+                                                     serialized.size(),
+                                                     &state);
+        if (!is_status_ok(status))
+        {
+            if (state != nullptr)
+            {
+                fmi2_freeFMUstate(handle, &state);
+            }
+            throw std::runtime_error(state_failure(instance_.instance_name(), "fmi2_deSerializeFMUstate", status));
+        }
+
+        status = fmi2_setFMUstate(handle, state);
+        auto free_status = fmi2_freeFMUstate(handle, &state);
+
+        if (!is_status_ok(status))
+        {
+            throw std::runtime_error(state_failure(instance_.instance_name(), "fmi2_setFMUstate", status));
+        }
+        if (!is_status_ok(free_status))
+        {
+            throw std::runtime_error(state_failure(instance_.instance_name(), "fmi2_freeFMUstate", free_status));
+        }
+    }
+
+    void CoSimulationModel::set_current_time(uint64_t time_ns)
+    {
+        current_time_ = time_ns;
     }
 
     bool CoSimulationModel::terminate()

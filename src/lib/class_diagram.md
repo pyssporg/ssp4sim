@@ -1,30 +1,57 @@
 classDiagram
 
 class Simulator {
-  +runner: std::unique_ptr<ThreadedRunner>
+  +config: SharedConfig
   +Simulator(config)
   +init()
   +simulate()
   +start()
+  +pause(at_sim_time_ns)
+  +resume()
+  +stop(at_sim_time_ns)
+  +set_speed(speed, at_sim_time_ns)
   +info() RunInfo
-  +wait()
+  +wait() RunResult
+  +shutdown()
+  +snapshot(path) SnapshotSummary
+  +restore(path, start)
+  +reset()
+  +rebuild(old, config, snapshot)$ RebuildResult
+  +create_initialized(config)$ std::unique_ptr<Simulator>
+  +create_restored(config, path)$ std::unique_ptr<Simulator>
 }
 
-class ThreadedRunner {
-  +stepper: std::unique_ptr<SimulationStepper>
-  +control: std::shared_ptr<control::RunControl>
+note for Simulator "Simulator is the caller facade: it retains the creation config and delegates init/start/simulate/pause/resume/stop/set_speed/info/snapshot/wait/shutdown to its SimulationRuntime; restore and rebuild construct replacements through the private factories."
+
+class SimulationRuntime {
+  +config: SharedConfig
+  +log: Logger*
+  +core: std::unique_ptr<SimulatorCore>
+  +control: std::unique_ptr<RunControl>
   +run_mutex: std::mutex
   +run_thread: std::thread
   +run_future: std::shared_future<RunResult>
   +run_started: bool
+  +init()
   +start()
-  +run(): RunResult
+  +simulate()
+  +pause(at_sim_time_ns)
+  +resume()
+  +stop(at_sim_time_ns)
+  +set_speed(speed, at_sim_time_ns)
   +info() RunInfo
+  +snapshot(path) SnapshotSummary
+  +wait() RunResult
+  +shutdown() std::string
+  +load_snapshot(path)
+  +run() RunResult
+  +has_run_thread() bool
+  +close_and_cancel_work()
 }
 
-note for ThreadedRunner "run() owns the outer macro-step loop: calls RunControl::before_slice(), SimulationStepper::step(), RunControl::publish_boundary(), then flushes and finalizes through RunControl::finish()"
+note for SimulationRuntime "SimulationRuntime owns the simulation side: the synchronous core, the run thread/mutex/future, and the outer macro-step loop. RunControl is the single locked queue/status object in the same simulation/runtime/ folder. run() calls RunControl::next_action(), SimulatorCore::step(), RunControl::publish_time(), then flushes and finalizes through RunControl::finish(); every exit path shares one epilogue that closes run work once before the recorder flush. snapshot() posts one private SnapshotWork : RunThreadTask and blocks on its promise; the core owns save/load."
 
-class SimulationStepper {
+class SimulatorCore {
   +ssp: std::unique_ptr<Ssp>
   +conf: std::unique_ptr<SharedConfig>
   +session_uuid: std::string
@@ -38,21 +65,54 @@ class SimulationStepper {
   +advance_to(target): StepStatus
   +sim_time_ns() uint64_t
   +end_time_ns() uint64_t
+  +save_snapshot(path) SnapshotSummary
+  +load_snapshot(path)
   +finish()
+}
+
+class SnapshotSummary {
+  +sim_time_ns: uint64_t
+  +model_count: size_t
+  +file_bytes: size_t
 }
 
 class RunControl {
   +mutex_: std::mutex
   +cv_: std::condition_variable
-  +deferred_: std::multimap
   +state_: RunState
-  +sim_time_ns_: uint64_t
-  +speed_: double
-  +before_slice(slice_start_ns) bool
-  +publish_boundary(boundary_ns)
+  +clock_: PacingClock
+  +events_: std::multimap<uint64_t, Event>
+  +closed_: bool
+  +next_action(step_start_ns) LoopAction
+  +post_work(work) bool
+  +pop_work() RunThreadTask
+  +drain_work()
+  +close_events()
+  +pending_events() size_t
+  +publish_time(time_ns)
   +request_stop()
   +finish(result) RunResult
   +info() RunInfo
+}
+
+class PacingClock {
+  +sim_time_ns_: uint64_t
+  +speed_: double
+  +anchor_wall_ns_: int64_t
+  +anchor_sim_ns_: uint64_t
+  +advance_to(time_ns)
+  +apply_speed(speed)
+  +anchor_at(sim_time_ns)
+  +compute_deadline_ns() uint64_t
+}
+
+class RebuildResult {
+  +replacement: std::unique_ptr
+  +exception: std::exception_ptr
+  +message: std::string
+  +old_info: RunInfo
+  +old_run_error: std::string
+  +had_run: bool
 }
 
 class RunInfo {
@@ -190,16 +250,21 @@ class RunInfo {
   }
 
 
-Simulator *-- ThreadedRunner
-ThreadedRunner *-- RunControl
-ThreadedRunner *-- SimulationStepper
-ThreadedRunner ..> RunInfo
+Simulator *-- SimulationRuntime
+SimulationRuntime *-- RunControl
+SimulationRuntime *-- SimulatorCore
+Simulator ..> SnapshotSummary
+RunControl *-- PacingClock
+RunControl *-- RunThreadTask
+SimulatorCore ..> SnapshotSummary
+Simulator ..> RebuildResult
 Simulator ..> RunInfo
-SimulationStepper *-- FmuHandler
-SimulationStepper *-- DataRecorder
-SimulationStepper *-- Graph
-SimulationStepper *-- GraphBuilder
-SimulationStepper *--  AnalysisGraphBuilder
+SimulationRuntime ..> RunInfo
+SimulatorCore *-- FmuHandler
+SimulatorCore *-- DataRecorder
+SimulatorCore *-- Graph
+SimulatorCore *-- GraphBuilder
+SimulatorCore *--  AnalysisGraphBuilder
 AnalysisGraph --> GraphBuilder
 
 FmuHandler *-- "many" FmuInfo

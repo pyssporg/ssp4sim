@@ -136,21 +136,21 @@ are configured globally, and the SSP is still loaded from the path in
 
 ### Synchronous C++ API
 
-`cpp_api/stepper.hpp` exposes `SimulationStepper` directly. It has no worker
+`cpp_api/simulator_core.hpp` exposes `SimulatorCore` directly. It has no worker
 thread, pacing, pause, or speed: callers drive time with `step()` or
 `advance_to(target_ns)`, read `sim_time_ns()`/`end_time_ns()`, and call
 `finish()` to flush recording. This is the C++ counterpart of the synchronous
 C ABI and the intended core for future FMU/embedded wrappers.
 
 ```cpp
-#include "cpp_api/stepper.hpp"
+#include "cpp_api/simulator_core.hpp"
 
-ssp4sim::SimulationStepper stepper(std::move(config));
-stepper.init();
-stepper.start();
-while (stepper.step() == ssp4sim::StepStatus::Advanced) {
+ssp4sim::SimulatorCore core(std::move(config));
+core.init();
+core.start();
+while (core.step() == ssp4sim::StepStatus::Advanced) {
 }
-stepper.finish();
+core.finish();
 ```
 
 ## Python API
@@ -194,6 +194,7 @@ and exception mapping are unchanged.
 | Start | `start()` (blocks until running or terminal) | `ssp4sim_simulator_start` | `start()` |
 | Pause / resume | `pause(at_sim_time_ns = nullopt)` / `resume()` | `ssp4sim_simulator_pause` / `..._resume` | `pause(at=None)` / `resume()` |
 | Stop | `stop(at_sim_time_ns = nullopt)` | `ssp4sim_simulator_stop` | `stop(at=None)` |
+| Reset | `reset()` | `ssp4sim_simulator_reset` | `reset()` |
 | Set speed | `set_speed(double, at_sim_time_ns = nullopt)` | `ssp4sim_simulator_set_speed` | `set_speed(speed, at=None)` |
 | Read coherent state/time/speed | `info()` → `RunInfo` | `ssp4sim_simulator_get_info` → `ssp4sim_run_info` | `info()` → `dict` |
 | Wait for finish | `wait()` → `RunResult` | `ssp4sim_simulator_wait(handle, &result)` | `wait()` → `str` |
@@ -207,6 +208,12 @@ no later `stop()` changes it. `stop()` is idempotent once `stopping` or
 terminal, preserves results up to the last completed macro step, and is an
 error before the run starts; stopping an unstarted run through teardown yields
 `stopped`. A completed run reports the configured end time.
+
+**Reset.** `reset()` is blocking: it stops and joins any current run, discards
+per-run state, and rebuilds a fresh initialized run from the creation config.
+On success the simulator is `initialized` at the configured start time, so a
+later `init()` is invalid; a subsequent `start()` runs the config from the
+beginning.
 
 **Speed.** `set_speed()` takes a finite factor `>= 0`: `0` runs as fast as
 possible, `1` is realtime, values above `1` run faster, and values between `0`
@@ -257,8 +264,8 @@ The C wrapper symbols are declared in
 
 ### Synchronous C API
 
-[`c_api/stepper_c_api.h`](../src/lib/public_include/c_api/stepper_c_api.h) exposes the
-internal `SimulationStepper` directly as `ssp4sim_stepper_*`. It has no worker
+[`c_api/simulator_core_c_api.h`](../src/lib/public_include/c_api/simulator_core_c_api.h) exposes the
+internal `SimulatorCore` directly as `ssp4sim_simulator_core_*`. It has no worker
 thread, wall-clock pacing, pause, or speed: callers drive time with `step()`
 (one configured macro step) or `advance_to(target_ns)` (an exact target,
 clamped to the end time), read `sim_time_ns`/`end_time_ns` with `get_info()`,
@@ -267,26 +274,26 @@ and call `finish()` to stop and flush the recorder. `destroy()` does not call
 ABIs share `c_api/c_api_common.h` (`ssp4sim_status` and `ssp4sim_last_error`).
 
 ```c
-#include "c_api/stepper_c_api.h"
+#include "c_api/simulator_core_c_api.h"
 
-ssp4sim_stepper_handle *stepper = NULL;
-if (ssp4sim_stepper_create("./config.json", &stepper) == SSP4SIM_STATUS_OK) {
-    ssp4sim_stepper_init(stepper);
-    ssp4sim_stepper_start(stepper);
+ssp4sim_simulator_core_handle *core = NULL;
+if (ssp4sim_simulator_core_create("./config.json", &core) == SSP4SIM_STATUS_OK) {
+    ssp4sim_simulator_core_init(core);
+    ssp4sim_simulator_core_start(core);
     ssp4sim_step_status status;
-    while (ssp4sim_stepper_step(stepper, &status) == SSP4SIM_STATUS_OK &&
+    while (ssp4sim_simulator_core_step(core, &status) == SSP4SIM_STATUS_OK &&
            status == SSP4SIM_STEP_ADVANCED) {
     }
-    ssp4sim_stepper_finish(stepper);
-    ssp4sim_stepper_destroy(stepper);
+    ssp4sim_simulator_core_finish(core);
+    ssp4sim_simulator_core_destroy(core);
 }
 ```
 
 ## Control Daemon
 
 `ssp4simd` is a local frontend that drives the simulation runtime
-(`ThreadedRunner`) directly over a Unix domain socket; external clients use the
-`Simulator` facade. It is built by default; see
+(`Simulator`) directly over a Unix domain socket; external clients use the
+C and Python APIs. It is built by default; see
 [Build From Source](build_from_source.md#control-daemon).
 
 ```bash
@@ -302,7 +309,8 @@ single-threaded poll loop serves all clients.
 
 The protocol is newline-delimited JSON (one object per line, maximum 1 MiB).
 Every request carries `"v":1`, an optional `id`, and a string `cmd`. A response
-echoes the request `id`; events carry no `id`. Any connected client may issue
+echoes the request `id`; a `snapshot` event carries the `id` of the request that
+produced it, and other events carry none. Any connected client may issue
 commands; the daemon accepts at most eight clients.
 
 **Commands.**
@@ -315,7 +323,9 @@ commands; the daemon accepts at most eight clients.
 | `stop` | optional `at` (seconds) | `ok:true` |
 | `state` | — | `ok:true`, `state`, `sim_time` (seconds), `speed` |
 | `set_speed` | `speed` (finite, `>= 0`), optional `at` (seconds) | `ok:true` |
-| `reset` | — | `ok:true` |
+| `reset` | — | `ok:true`, `accepted:true`; completion arrives as a `lifecycle` event |
+| `snapshot` | `path` (non-empty string) | `ok:true`, `accepted:true`; completion arrives as a `snapshot` event |
+| `restore` | `path` (non-empty string), optional `start` (default `true`) | `ok:true`, `accepted:true`; completion arrives as a `lifecycle` event |
 | `shutdown` | — | `ok:true`, then the daemon exits |
 
 `at` and `sim_time` are seconds.
@@ -325,11 +335,12 @@ planned/deferred and are not in current releases.
 
 A response is `{"v":1,"id":<id>,"ok":true,...}` on success or
 `{"v":1,"id":<id>,"ok":false,"error":{"code":"...","message":"..."}}` on
-failure. Typical error codes include `bad_json`, `bad_version`, `bad_request`,
-`bad_speed`, `bad_value`, `unknown_command`, `reset_failed`, and
-`server_busy`.
+failure. Typical response error codes include `bad_json`, `bad_version`,
+`bad_request`, `bad_speed`, `bad_value`, `bad_state`, `unknown_command`, and
+`server_busy`. A lifecycle rebuild failure is reported in the `lifecycle` event
+with code `reset_failed` or `restore_failed`.
 
-**Events.** Events are pushed to every client and have no `id`:
+**Events.** Events are pushed to every client; only `snapshot` events carry an `id`:
 
 | `event` | Fields | Meaning |
 |---|---|---|
@@ -337,16 +348,68 @@ failure. Typical error codes include `bad_json`, `bad_version`, `bad_request`,
 | `time` | `sim_time`, `speed` | Progress while running or paused, throttled to about 10 Hz. |
 | `done` | `result`, `sim_time` | Terminal outcome; `result` is `completed`, `stopped`, or `failed`. |
 | `error` | `code`, `message` | A simulation failure, emitted before `done`. |
+| `snapshot` | `id` (the request id, omitted when absent), `ok`, `code`, `path`, `models_done`, `models_total`, and either `sim_time` (seconds) plus `bytes` (total checkpoint file size), or `error` | A snapshot completed or failed (running or paused). `code` is `ok` on success, otherwise `run_ended` or the failure code. |
+| `lifecycle` | `operation` (`reset` or `restore`), `ok`, and either `state` plus `sim_time` (seconds), or `code` plus `error` | A reset or restore finished. On failure `code` is `reset_failed` or `restore_failed` and the previous (stopped) runner is kept. |
 
 `time` events are droppable: a slow client can miss them and may be
-disconnected. `state`, `done`, and `error` events are not droppable.
+disconnected. `state`, `done`, `error`, `snapshot`, and
+`lifecycle` events are not droppable.
 
-**`reset` and `shutdown`.** `reset` stops and waits for any live run, destroys
-the runner, rebuilds it from the same config, initializes it, and resets
-control state (overrides once that deferred feature lands). Resetting a live
-run emits that run's terminal `state` and `done` before the fresh `initialized`
-state. There is one active simulation per daemon. `shutdown` stops and waits
-for a live run, closes clients, unlinks the socket, and exits.
+**`reset` and `shutdown`.** `reset` is asynchronous: it replies `accepted` and
+rebuilds on a background thread. While that job runs, `state` and `shutdown`
+still work but every mutating command (including `snapshot`) returns
+`server_busy`. The background thread stops and joins any live run, emits its
+terminal `state` and `done` before the fresh `initialized` state, destroys the
+old runner, and installs a freshly constructed, initialized runner built from
+the original parsed config, so no in-memory simulation state (FMUs, rings,
+resolver frontiers, time, or pending snapshot work) survives. Configured output
+destinations are reused rather than deleted: CSV truncates when the new sink
+opens, and an explicitly configured SQLite database is retained with a new run
+id. Completion is reported by a `lifecycle` event with `operation:"reset"`.
+There is one active simulation per daemon. `shutdown` joins any lifecycle job,
+stops and waits for a live run, closes clients, unlinks the socket, and exits.
+
+**`snapshot` and `restore`.** `snapshot` requires
+`Running` or `Paused` and works identically in both states. The daemon owns an
+async snapshot worker and a request queue, so several requests may be queued;
+each one immediately replies `accepted`. The worker calls the blocking
+`Simulator::snapshot(path)`, which posts one run-thread task on the time-sorted
+queue inside `RunControl`; the run worker consumes it at the next
+macro-step boundary. Success or failure always arrives as one `snapshot` event
+carrying the request `id` and a `code`. There are no snapshot progress events.
+A checkpoint is a version-4 `SSP4SNAP` container: a checksummed 28-byte header,
+a JSON manifest, and a payload made of self-serialized sections listed in the
+manifest (one per live FMU model plus one resolver-frontier section). The
+manifest carries the SSP content hash and `sim_time_ns`. The checksum covers
+the manifest and payload as a whole. String-valued signal
+storage is carried inside the model sections with zeroed binary ranges; invalid
+UTF-8 or an embedded NUL is `unsupported`. A save
+writes a `<target>.part-<uuid>` temp sibling, fsyncs the temp file strictly,
+renames it atomically, and attempts a best-effort parent-directory fsync, so a
+partially written file never replaces a good checkpoint. A queued snapshot is
+settled as `run_ended` if the run ends before the next step; to discard a
+completed checkpoint, delete the file manually.
+
+When `simulation.snapshot.directory` is set, `snapshot` and `restore` reject a
+`path` outside that directory with `bad_value`; paths are canonicalized first,
+so `..` and symlinks that resolve outside are rejected too. When the key is
+absent, any path is accepted.
+
+`restore` is asynchronous like `reset`: it replies `accepted`, stops and joins
+any live run on a background thread, rebuilds the runner from the same config,
+and loads the snapshot. It requires the same SSP (content hash); experiment
+timing (start, timestep, and end) comes from the live config. On completion the
+`lifecycle` event with `operation:"restore"` reports `ok:true` and the resulting
+`state`/`sim_time`, or `ok:false` with `restore_failed`. With `start:false` the
+new run is `Initialized` and remains stopped (`state` confirms it, and `start`
+works once the lifecycle event has cleared the busy state); with the default
+`start:true` it starts immediately and keeps the prior run's speed (the pace is
+carried into the fresh control before start, not reapplied after). All FMUs in
+the SSP must declare `canGetAndSetFMUstate` and `canSerializeFMUstate`
+(all-or-nothing), or restore fails. Snapshot files are build/version specific
+and are not portable across FMU builds. When CSV recording is enabled, restore
+writes to a new segment named `<stem>.restored-<uuid><ext>` in the same
+directory, so the prior run's recorder output is preserved.
 
 Minimal client (responses and events are read from one persistent connection):
 

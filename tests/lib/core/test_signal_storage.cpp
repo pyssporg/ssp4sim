@@ -4,10 +4,83 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <span>
 #include <stdexcept>
+#include <string>
+#include <vector>
 
 using ssp4sim::signal::SignalStorage;
 using ssp4sim::types::DataType;
+
+namespace
+{
+    std::vector<std::byte> serialize_storage(const SignalStorage &storage)
+    {
+        ssp4sim::serialize::Writer writer;
+        storage.serialize(writer);
+        return writer.take();
+    }
+
+    void deserialize_storage(const std::vector<std::byte> &bytes,
+                             SignalStorage &storage)
+    {
+        ssp4sim::serialize::Reader reader{std::span<const std::byte>(bytes)};
+        storage.deserialize(reader);
+        reader.expect_end();
+    }
+
+    struct ParsedStorageSection
+    {
+        std::string name;
+        std::size_t areas = 0;
+        std::size_t area_byte_size = 0;
+        std::size_t ring_capacity = 0;
+        std::size_t original_size = 0;
+        std::size_t aligned_size = 0;
+        std::size_t capacity = 0;
+        std::size_t head = 0;
+        std::size_t write_count = 0;
+        std::vector<std::uint64_t> timestamps;
+        std::vector<std::uint8_t> populated;
+        std::span<const std::byte> data;
+    };
+
+    ParsedStorageSection parse_storage_section(
+        const std::vector<std::byte> &bytes)
+    {
+        ssp4sim::serialize::Reader reader{std::span<const std::byte>(bytes)};
+        ParsedStorageSection parsed;
+
+        parsed.name = reader.read_string();
+        parsed.areas = static_cast<std::size_t>(reader.read_u64());
+        parsed.area_byte_size = static_cast<std::size_t>(reader.read_u64());
+        parsed.ring_capacity = static_cast<std::size_t>(reader.read_u64());
+
+        parsed.original_size = static_cast<std::size_t>(reader.read_u64());
+        parsed.aligned_size = static_cast<std::size_t>(reader.read_u64());
+        parsed.capacity = static_cast<std::size_t>(reader.read_u64());
+        parsed.head = static_cast<std::size_t>(reader.read_u64());
+        parsed.write_count = static_cast<std::size_t>(reader.read_u64());
+
+        const std::uint64_t timestamp_count = reader.read_u64();
+        parsed.timestamps.reserve(static_cast<std::size_t>(timestamp_count));
+        for (std::uint64_t i = 0; i < timestamp_count; ++i)
+        {
+            parsed.timestamps.push_back(reader.read_u64());
+        }
+
+        const std::uint64_t populated_count = reader.read_u64();
+        parsed.populated.reserve(static_cast<std::size_t>(populated_count));
+        for (std::uint64_t i = 0; i < populated_count; ++i)
+        {
+            parsed.populated.push_back(reader.read_u8());
+        }
+
+        parsed.data = reader.read_blob();
+        return parsed;
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Description: Verifies aligned layout, correct offsets, area_byte_size stride,
@@ -169,4 +242,252 @@ TEST_CASE("SignalStorage get_or_push reuses existing timestamp areas", "[SignalS
     REQUIRE(found == first);
     REQUIRE(storage.find_area(200, found));
     REQUIRE(found == third);
+}
+
+// ---------------------------------------------------------------------------
+// Description: Verifies serialization captures identity and ring payload and
+//              deserialization reproduces it
+// Rationale:   The wire round-trip must be lossless for mid-run state capture
+// ---------------------------------------------------------------------------
+TEST_CASE("SignalStorage serialization round-trips ring state", "[SignalStorage]")
+{
+    SignalStorage storage(3, "signals");
+    const auto value_index = storage.add_variable("signals.temperature", DataType::real, 1);
+    storage.allocate();
+
+    const auto first = storage.push(100);
+    const auto second = storage.push(200);
+    *reinterpret_cast<double *>(storage.get_item(first, value_index)) = 1.5;
+    *reinterpret_cast<double *>(storage.get_item(second, value_index)) = 2.5;
+    *reinterpret_cast<double *>(storage.get_derivative(first, value_index, 1)) = 0.5;
+
+    const std::vector<std::byte> bytes = serialize_storage(storage);
+    const ParsedStorageSection parsed = parse_storage_section(bytes);
+
+    REQUIRE(parsed.name == storage.name);
+    REQUIRE(parsed.areas == storage.areas);
+    REQUIRE(parsed.area_byte_size == storage.area_byte_size);
+    REQUIRE(parsed.ring_capacity == storage.ring->capacity);
+    REQUIRE(parsed.capacity == storage.ring->capacity);
+    REQUIRE(parsed.data.size() == storage.ring->buffers.total_size);
+
+    SignalStorage restored(3, "signals");
+    restored.add_variable("signals.temperature", DataType::real, 1);
+    restored.allocate();
+    deserialize_storage(bytes, restored);
+
+    REQUIRE(restored.get_time(first) == 100);
+    REQUIRE(restored.get_time(second) == 200);
+    REQUIRE(*reinterpret_cast<double *>(restored.get_item(first, value_index)) == 1.5);
+    REQUIRE(*reinterpret_cast<double *>(restored.get_item(second, value_index)) == 2.5);
+    REQUIRE(*reinterpret_cast<double *>(
+                restored.get_derivative(first, value_index, 1)) == 0.5);
+}
+
+// ---------------------------------------------------------------------------
+// Description: Verifies pushes after serialization are undone by
+//              deserialization so the older values and timestamps become
+//              visible again
+// Rationale:   Proves deserialization rewinds the logical areas, not just bytes
+// ---------------------------------------------------------------------------
+TEST_CASE("SignalStorage deserialization rewinds areas after later pushes", "[SignalStorage]")
+{
+    SignalStorage storage(3, "signals");
+    const auto value_index = storage.add_variable("signals.temperature", DataType::real, 0);
+    storage.allocate();
+
+    const auto older = storage.push(100);
+    const auto newer = storage.push(200);
+    *reinterpret_cast<double *>(storage.get_item(older, value_index)) = 10.0;
+    *reinterpret_cast<double *>(storage.get_item(newer, value_index)) = 20.0;
+
+    const std::vector<std::byte> bytes = serialize_storage(storage);
+
+    // Wrap the ring; the fourth area overwrites the older slot.
+    storage.push(300);
+    const auto overwriter = storage.push(400);
+    *reinterpret_cast<double *>(storage.get_item(overwriter, value_index)) = 40.0;
+
+    std::size_t found = 0;
+    REQUIRE(storage.find_area(100, found) == false);
+    REQUIRE(storage.find_area(300, found) == true);
+
+    deserialize_storage(bytes, storage);
+
+    REQUIRE(storage.get_time(older) == 100);
+    REQUIRE(storage.get_time(newer) == 200);
+    REQUIRE(*reinterpret_cast<double *>(storage.get_item(older, value_index)) == 10.0);
+    REQUIRE(*reinterpret_cast<double *>(storage.get_item(newer, value_index)) == 20.0);
+    REQUIRE(storage.find_area(100, found) == true);
+    REQUIRE(found == older);
+    REQUIRE(storage.find_area(300, found) == false);
+    REQUIRE(storage.find_area(400, found) == false);
+}
+
+// ---------------------------------------------------------------------------
+// Description: Verifies deserialization rejects state from an incompatible
+//              storage
+// Rationale:   Identity mismatches would copy the wrong layout into the ring
+// ---------------------------------------------------------------------------
+TEST_CASE("SignalStorage deserialization rejects identity mismatch", "[SignalStorage]")
+{
+    SignalStorage source(2, "source");
+    source.add_variable("source.value", DataType::real, 0);
+    source.allocate();
+    const std::vector<std::byte> bytes = serialize_storage(source);
+
+    SignalStorage wrong_name(2, "other");
+    wrong_name.add_variable("other.value", DataType::real, 0);
+    wrong_name.allocate();
+    {
+        ssp4sim::serialize::Reader reader{std::span<const std::byte>(bytes)};
+        REQUIRE_THROWS_AS(wrong_name.deserialize(reader), ssp4sim::serialize::Error);
+    }
+
+    SignalStorage wrong_areas(3, "source");
+    wrong_areas.add_variable("source.value", DataType::real, 0);
+    wrong_areas.allocate();
+    {
+        ssp4sim::serialize::Reader reader{std::span<const std::byte>(bytes)};
+        REQUIRE_THROWS_AS(wrong_areas.deserialize(reader), ssp4sim::serialize::Error);
+    }
+
+    SignalStorage wrong_layout(2, "source");
+    wrong_layout.add_variable("source.value", DataType::real, 0);
+    wrong_layout.add_variable("source.extra", DataType::real, 0);
+    wrong_layout.allocate();
+    {
+        ssp4sim::serialize::Reader reader{std::span<const std::byte>(bytes)};
+        REQUIRE_THROWS_AS(wrong_layout.deserialize(reader), ssp4sim::serialize::Error);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Description: Verifies string values are serialized as typed values while
+//              their raw ring bytes are zeroed, then restored in place
+// Rationale:   Raw copying an in-place std::string would save process-local
+//              pointers; typed serialization is safe across processes
+// ---------------------------------------------------------------------------
+TEST_CASE("SignalStorage serialization round-trips string values", "[SignalStorage]")
+{
+    SignalStorage storage(3, "strings");
+    const auto real_index = storage.add_variable("strings.real", DataType::real, 0);
+    const auto string_index = storage.add_variable("strings.label", DataType::string, 0);
+    storage.allocate();
+
+    const auto first = storage.push(100);
+    const auto second = storage.push(200);
+    const auto third = storage.push(300);
+
+    const std::string long_value(64, 'x');
+    const std::vector<std::string> expected_strings = {"hi", long_value, "ok"};
+    const std::vector<double> expected_reals = {1.25, 2.5, 3.75};
+    const std::vector<std::size_t> areas = {first, second, third};
+
+    std::vector<std::string> expected_strings_by_area(storage.areas);
+    std::vector<double> expected_reals_by_area(storage.areas);
+    for (std::size_t a = 0; a < areas.size(); ++a)
+    {
+        *reinterpret_cast<std::string *>(storage.get_item(areas[a], string_index)) =
+            expected_strings[a];
+        *reinterpret_cast<double *>(storage.get_item(areas[a], real_index)) =
+            expected_reals[a];
+        expected_strings_by_area[areas[a]] = expected_strings[a];
+        expected_reals_by_area[areas[a]] = expected_reals[a];
+    }
+
+    const std::vector<std::byte> bytes = serialize_storage(storage);
+    const ParsedStorageSection parsed = parse_storage_section(bytes);
+
+    REQUIRE(parsed.name == "strings");
+    REQUIRE(parsed.areas == storage.areas);
+    REQUIRE(parsed.area_byte_size == storage.area_byte_size);
+    REQUIRE(parsed.ring_capacity == storage.ring->capacity);
+    REQUIRE(parsed.data.size() == storage.ring->buffers.total_size);
+
+    const std::size_t string_position = storage.variables[string_index].position;
+    const std::size_t string_size = storage.variables[string_index].type_size;
+    const std::size_t real_position = storage.variables[real_index].position;
+    for (std::size_t a = 0; a < areas.size(); ++a)
+    {
+        const std::size_t string_offset =
+            a * parsed.aligned_size + string_position;
+        for (std::size_t b = 0; b < string_size; ++b)
+        {
+            REQUIRE(parsed.data[string_offset + b] == std::byte{0});
+        }
+
+        double saved_real = 0.0;
+        std::memcpy(&saved_real,
+                    parsed.data.data() + a * parsed.aligned_size + real_position,
+                    sizeof(double));
+        REQUIRE(saved_real == expected_reals_by_area[a]);
+    }
+
+    SignalStorage restored(3, "strings");
+    restored.add_variable("strings.real", DataType::real, 0);
+    restored.add_variable("strings.label", DataType::string, 0);
+    restored.allocate();
+    deserialize_storage(bytes, restored);
+
+    REQUIRE(restored.get_time(first) == 100);
+    REQUIRE(restored.get_time(second) == 200);
+    REQUIRE(restored.get_time(third) == 300);
+    for (std::size_t a = 0; a < areas.size(); ++a)
+    {
+        REQUIRE(*reinterpret_cast<std::string *>(
+                    restored.get_item(areas[a], string_index)) == expected_strings[a]);
+        REQUIRE(*reinterpret_cast<double *>(
+                    restored.get_item(areas[a], real_index)) == expected_reals[a]);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Description: Verifies string validation happens before any live string is
+//              destroyed, so rejected state leaves the live values intact
+// Rationale:   A failed deserialization must not lose the current run state
+// ---------------------------------------------------------------------------
+TEST_CASE("SignalStorage deserialization validates strings before mutation", "[SignalStorage]")
+{
+    SignalStorage storage(2, "validated");
+    const auto string_index = storage.add_variable("validated.label", DataType::string, 0);
+    storage.allocate();
+
+    const auto first = storage.push(100);
+    const auto second = storage.push(200);
+    *reinterpret_cast<std::string *>(storage.get_item(first, string_index)) = "first";
+    *reinterpret_cast<std::string *>(storage.get_item(second, string_index)) = "second";
+
+    // Same identity and layout, different variable name: the string entry name
+    // check must reject this before the live strings are reconstructed.
+    SignalStorage corrupt(2, "validated");
+    corrupt.add_variable("validated.other", DataType::string, 0);
+    corrupt.allocate();
+    corrupt.push(100);
+    corrupt.push(200);
+    const std::vector<std::byte> bytes = serialize_storage(corrupt);
+
+    ssp4sim::serialize::Reader reader{std::span<const std::byte>(bytes)};
+    REQUIRE_THROWS_AS(storage.deserialize(reader), ssp4sim::serialize::Error);
+    REQUIRE(*reinterpret_cast<std::string *>(storage.get_item(first, string_index)) ==
+            "first");
+    REQUIRE(*reinterpret_cast<std::string *>(storage.get_item(second, string_index)) ==
+            "second");
+}
+
+// ---------------------------------------------------------------------------
+// Description: Verifies string variables are detectable
+// Rationale:   Typed string serialization and diagnostics key off this helper
+// ---------------------------------------------------------------------------
+TEST_CASE("SignalStorage reports string variables", "[SignalStorage]")
+{
+    SignalStorage numeric(2, "numeric");
+    numeric.add_variable("numeric.real", DataType::real, 0);
+    numeric.add_variable("numeric.mode", DataType::integer, 0);
+    REQUIRE_FALSE(numeric.has_string_variables());
+
+    SignalStorage with_string(2, "with_string");
+    with_string.add_variable("with_string.real", DataType::real, 0);
+    with_string.add_variable("with_string.label", DataType::string, 0);
+    REQUIRE(with_string.has_string_variables());
 }

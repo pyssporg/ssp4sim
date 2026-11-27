@@ -1,7 +1,7 @@
 #include "cpp_api/simulator.hpp"
 #include "shared_config.hpp"
-#include "simulation/runner/threaded_runner.hpp"
-#include "cpp_api/stepper.hpp"
+#include "runtime_control.hpp"
+#include "cpp_api/simulator_core.hpp"
 
 #include "ssp4cpp/utils/log.hpp"
 
@@ -15,7 +15,7 @@
 #include <filesystem>
 #include <functional>
 #include <fstream>
-#include <future>
+#include <limits>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -321,6 +321,142 @@ TEST_CASE("a second start is rejected", "[simulation][lifecycle][control]")
     REQUIRE(sim.wait() == RunResult::Completed);
 }
 
+TEST_CASE("invalid control transitions throw logic_error",
+          "[simulation][lifecycle][control]")
+{
+    const fs::path ssp_dir = fixture_path("scenario");
+    if (!fs::exists(ssp_dir / "SystemStructure.ssd"))
+    {
+        SKIP("requires the scenario SSP fixture");
+    }
+
+    auto workdir = ssp4sim::tests::reference_ssp::project_root() / ".dynamic-harness" / "wd" / "invalid_transitions";
+    auto config = make_lifecycle_config(workdir, 1.0, std::nullopt, false, 1.0);
+    config.ssp_path = ssp_dir.string();
+
+    ssp4sim::Simulator sim(std::move(config));
+    sim.init();
+    REQUIRE(sim.info().state == RunState::Initialized);
+
+    REQUIRE_THROWS_AS(sim.pause(), std::logic_error);
+    REQUIRE_THROWS_AS(sim.resume(), std::logic_error);
+    REQUIRE_THROWS_AS(sim.stop(), std::logic_error);
+    REQUIRE(sim.info().state == RunState::Initialized);
+
+    REQUIRE_THROWS_AS(sim.set_speed(-1.0), std::invalid_argument);
+    REQUIRE_THROWS_AS(
+        sim.set_speed(std::numeric_limits<double>::quiet_NaN()),
+        std::invalid_argument);
+    REQUIRE_THROWS_AS(
+        sim.set_speed(std::numeric_limits<double>::infinity()),
+        std::invalid_argument);
+
+    REQUIRE_NOTHROW(sim.set_speed(2.0));
+    REQUIRE(sim.info().speed == 2.0);
+    REQUIRE(sim.info().state == RunState::Initialized);
+}
+
+TEST_CASE("immediate pause resume stop and speed stay coherent",
+          "[simulation][lifecycle][control]")
+{
+    const fs::path ssp_dir = fixture_path("signal_step_gain");
+    if (!fs::exists(ssp_dir / "SystemStructure.ssd"))
+    {
+        SKIP("requires the signal_step_gain SSP fixture");
+    }
+
+    auto workdir = ssp4sim::tests::reference_ssp::project_root() / ".dynamic-harness" / "wd" / "immediate_control";
+    fs::remove_all(workdir);
+
+    auto config = make_lifecycle_config(workdir, 10.0, 1.0, false, 0.01);
+    config.ssp_path = ssp_dir.string();
+
+    ssp4sim::Simulator sim(std::move(config));
+    sim.init();
+    sim.start();
+    REQUIRE(wait_until([&]() { return sim.info().state == RunState::Running; }));
+
+    sim.set_speed(2.0);
+    REQUIRE(sim.info().speed == 2.0);
+    sim.set_speed(4.0);
+    REQUIRE(sim.info().speed == 4.0);
+
+    sim.pause();
+    REQUIRE(sim.info().state == RunState::Paused);
+    REQUIRE(sim.info().speed == 4.0);
+
+    sim.resume();
+    REQUIRE(sim.info().state == RunState::Running);
+
+    sim.stop();
+    REQUIRE((sim.info().state == RunState::Stopping ||
+             sim.info().state == RunState::Stopped));
+    REQUIRE(sim.wait() == RunResult::Stopped);
+    REQUIRE(sim.info().state == RunState::Stopped);
+
+    // Stopping and terminal states are idempotent; stop never overwrites them.
+    REQUIRE_NOTHROW(sim.stop());
+    REQUIRE(sim.info().state == RunState::Stopped);
+}
+
+TEST_CASE("scheduled pause fires at its simulation time",
+          "[simulation][lifecycle][control]")
+{
+    const fs::path ssp_dir = fixture_path("signal_step_gain");
+    if (!fs::exists(ssp_dir / "SystemStructure.ssd"))
+    {
+        SKIP("requires the signal_step_gain SSP fixture");
+    }
+
+    auto workdir = ssp4sim::tests::reference_ssp::project_root() / ".dynamic-harness" / "wd" / "pause_scheduled";
+    fs::remove_all(workdir);
+
+    auto config = make_lifecycle_config(workdir, 5.0, 1.0, false, 0.01);
+    config.ssp_path = ssp_dir.string();
+
+    ssp4sim::Simulator sim(std::move(config));
+    sim.init();
+    sim.start();
+    REQUIRE(wait_until([&]() { return sim.info().state == RunState::Running; }));
+
+    sim.pause(200'000'000);
+    REQUIRE(sim.info().state == RunState::Running);
+    REQUIRE(wait_until([&]() { return sim.info().state == RunState::Paused; }));
+
+    sim.resume();
+    REQUIRE(wait_until([&]() { return sim.info().state == RunState::Running; }));
+
+    sim.stop();
+    REQUIRE(sim.wait() == RunResult::Stopped);
+}
+
+TEST_CASE("scheduled speed change applies and last equal-timestamp wins",
+          "[simulation][lifecycle][control]")
+{
+    const fs::path ssp_dir = fixture_path("signal_step_gain");
+    if (!fs::exists(ssp_dir / "SystemStructure.ssd"))
+    {
+        SKIP("requires the signal_step_gain SSP fixture");
+    }
+
+    auto workdir = ssp4sim::tests::reference_ssp::project_root() / ".dynamic-harness" / "wd" / "speed_scheduled";
+    fs::remove_all(workdir);
+
+    auto config = make_lifecycle_config(workdir, 0.5, 1.0, false, 0.01);
+    config.ssp_path = ssp_dir.string();
+
+    ssp4sim::Simulator sim(std::move(config));
+    sim.init();
+    sim.start();
+    REQUIRE(wait_until([&]() { return sim.info().state == RunState::Running; }));
+
+    sim.set_speed(2.0, 200'000'000);
+    sim.set_speed(4.0, 200'000'000);
+
+    REQUIRE(sim.wait() == RunResult::Completed);
+    REQUIRE(sim.info().speed == 4.0);
+}
+
 TEST_CASE("pause then resume completes the run", "[simulation][lifecycle][control]")
 {
     const fs::path ssp_dir = fixture_path("scenario");
@@ -367,7 +503,7 @@ TEST_CASE("stop yields Stopped and flushes partial CSV", "[simulation][lifecycle
     sim.start();
     REQUIRE(wait_until([&]() { return sim.info().state == RunState::Running; }));
 
-    // Let a couple of macro slices run so the stopped run has partial data.
+    // Let a couple of macro steps run so the stopped run has partial data.
     std::this_thread::sleep_for(std::chrono::milliseconds(250));
     sim.stop();
 
@@ -401,7 +537,7 @@ TEST_CASE("destructor while running stops and joins", "[simulation][lifecycle][c
     } // request stop, wait and join must complete without throwing
 }
 
-TEST_CASE("scheduled stop stops at a macro boundary", "[simulation][lifecycle][control]")
+TEST_CASE("scheduled stop stops at the loop top", "[simulation][lifecycle][control]")
 {
     const fs::path ssp_dir = fixture_path("signal_step_gain");
     if (!fs::exists(ssp_dir / "SystemStructure.ssd"))
@@ -413,7 +549,7 @@ TEST_CASE("scheduled stop stops at a macro boundary", "[simulation][lifecycle][c
     fs::remove_all(workdir);
 
     // Paced at real time so the future stop can be queued while the run is
-    // still well before the requested boundary.
+    // still well before the requested stop time.
     const auto config_path = write_config_file(workdir, ssp_dir.string(), 1.0,
                                                1.0, false, 0.01);
 
@@ -429,7 +565,7 @@ TEST_CASE("scheduled stop stops at a macro boundary", "[simulation][lifecycle][c
     REQUIRE(simulator.info().state == ssp4sim::RunState::Stopped);
 }
 
-TEST_CASE("runner pre-run request_stop yields Stopped", "[simulation][lifecycle][control]")
+TEST_CASE("runner pre-run shutdown yields Stopped", "[simulation][lifecycle][control]")
 {
     const fs::path ssp_dir = fixture_path("scenario");
     if (!fs::exists(ssp_dir / "SystemStructure.ssd"))
@@ -441,15 +577,15 @@ TEST_CASE("runner pre-run request_stop yields Stopped", "[simulation][lifecycle]
     auto config = make_lifecycle_config(workdir, 1.0, std::nullopt, false, 1.0);
     config.ssp_path = ssp_dir.string();
 
-    ssp4sim::ThreadedRunner runner(std::move(config));
+    ssp4sim::Simulator runner(std::move(config));
     runner.init();
-    runner.request_stop();
+    runner.shutdown();
     REQUIRE(runner.info().state == RunState::Stopped);
-    REQUIRE(runner.run() == RunResult::Stopped);
+    runner.simulate();
     REQUIRE(runner.info().state == RunState::Stopped);
 }
 
-TEST_CASE("completed run ignores request_stop", "[simulation][lifecycle][control]")
+TEST_CASE("completed run ignores shutdown", "[simulation][lifecycle][control]")
 {
     const fs::path ssp_dir = fixture_path("scenario");
     if (!fs::exists(ssp_dir / "SystemStructure.ssd"))
@@ -461,12 +597,16 @@ TEST_CASE("completed run ignores request_stop", "[simulation][lifecycle][control
     auto config = make_lifecycle_config(workdir, 1.0, std::nullopt, false, 1.0);
     config.ssp_path = ssp_dir.string();
 
-    ssp4sim::ThreadedRunner runner(std::move(config));
+    ssp4sim::Simulator runner(std::move(config));
     runner.init();
-    REQUIRE(runner.run() == RunResult::Completed);
+    runner.simulate();
     REQUIRE(runner.info().state == RunState::Completed);
 
-    runner.request_stop();
+    // Terminal states are monotonic: stop and shutdown leave Completed alone.
+    REQUIRE_NOTHROW(runner.stop());
+    REQUIRE(runner.info().state == RunState::Completed);
+
+    runner.shutdown();
     REQUIRE(runner.info().state == RunState::Completed);
 }
 
@@ -483,9 +623,9 @@ TEST_CASE("completed run publishes final sim time", "[simulation][lifecycle][con
     config.ssp_path = ssp_dir.string();
     const uint64_t end_time = config.fmu.end_time;
 
-    ssp4sim::ThreadedRunner runner(std::move(config));
+    ssp4sim::Simulator runner(std::move(config));
     runner.init();
-    REQUIRE(runner.run() == RunResult::Completed);
+    runner.simulate();
     REQUIRE(runner.info().state == RunState::Completed);
     REQUIRE(runner.info().sim_time_ns == end_time);
 }
@@ -503,9 +643,9 @@ TEST_CASE("zero timestep is rejected by the runner loop", "[simulation][lifecycl
     config.ssp_path = ssp_dir.string();
     REQUIRE(config.fmu.timestep == 0);
 
-    ssp4sim::ThreadedRunner runner(std::move(config));
+    ssp4sim::Simulator runner(std::move(config));
     runner.init();
-    REQUIRE_THROWS_AS(runner.run(), std::runtime_error);
+    REQUIRE_THROWS_AS(runner.simulate(), std::runtime_error);
     REQUIRE(runner.info().state == RunState::Failed);
 }
 
@@ -564,7 +704,36 @@ TEST_CASE("stop while paused at current time stops without resume", "[simulation
     REQUIRE(sim.info().state == RunState::Stopped);
 }
 
-TEST_CASE("immediate teardown after start yields Stopped", "[simulation][lifecycle][control]")
+TEST_CASE("reset discards a live run and rebuilds from the creation config", "[simulation][lifecycle][control]")
+{
+    const fs::path ssp_dir = fixture_path("scenario");
+    if (!fs::exists(ssp_dir / "SystemStructure.ssd"))
+    {
+        SKIP("requires the scenario SSP fixture");
+    }
+
+    auto workdir = ssp4sim::tests::reference_ssp::project_root() / ".dynamic-harness" / "wd" / "reset_live";
+    fs::remove_all(workdir);
+
+    auto config = make_lifecycle_config(workdir, 0.2, 1.0, false, 0.01);
+    config.ssp_path = ssp_dir.string();
+    const uint64_t start_time = config.fmu.start_time;
+
+    ssp4sim::Simulator sim(std::move(config));
+    sim.init();
+    sim.start();
+    REQUIRE(wait_until([&]() { return sim.info().state == RunState::Running; }));
+
+    sim.reset();
+
+    REQUIRE(sim.info().state == RunState::Initialized);
+    REQUIRE(sim.info().sim_time_ns == start_time);
+
+    sim.start();
+    REQUIRE(sim.wait() == RunResult::Completed);
+}
+
+TEST_CASE("immediate shutdown after start yields Stopped", "[simulation][lifecycle][control]")
 {
     const fs::path ssp_dir = fixture_path("scenario");
     if (!fs::exists(ssp_dir / "SystemStructure.ssd"))
@@ -576,26 +745,20 @@ TEST_CASE("immediate teardown after start yields Stopped", "[simulation][lifecyc
     auto config = make_lifecycle_config(workdir, 1.0, 1.0, false, 0.01);
     config.ssp_path = ssp_dir.string();
 
-    ssp4sim::ThreadedRunner runner(std::move(config));
+    ssp4sim::Simulator runner(std::move(config));
     runner.init();
 
-    std::packaged_task<RunResult()> task([&]() { return runner.run(); });
-    auto future = task.get_future();
-    std::thread run_thread(std::move(task));
+    runner.start();
+    runner.shutdown();
 
-    runner.request_stop();
-
-    REQUIRE(future.wait_for(std::chrono::seconds(5)) == std::future_status::ready);
-    run_thread.join();
-    REQUIRE(future.get() == RunResult::Stopped);
     REQUIRE(runner.info().state == RunState::Stopped);
 }
 
 // ---------------------------------------------------------------------------
-// Synchronous core: no thread, pacing or RunControl involved.
+// Synchronous core: no thread, pacing or control channel involved.
 // ---------------------------------------------------------------------------
 
-TEST_CASE("stepper advances to an exact time and finishes", "[simulation][stepper]")
+TEST_CASE("SimulatorCore advances to an exact time and finishes", "[simulation][simulator_core]")
 {
     const fs::path ssp_dir = fixture_path("scenario");
     if (!fs::exists(ssp_dir / "SystemStructure.ssd"))
@@ -603,14 +766,14 @@ TEST_CASE("stepper advances to an exact time and finishes", "[simulation][steppe
         SKIP("requires the scenario SSP fixture");
     }
 
-    auto workdir = ssp4sim::tests::reference_ssp::project_root() / ".dynamic-harness" / "wd" / "stepper_sync";
+    auto workdir = ssp4sim::tests::reference_ssp::project_root() / ".dynamic-harness" / "wd" / "simulator_core_sync";
     auto config = make_lifecycle_config(workdir, 1.0, std::nullopt, false, 0.1);
     config.ssp_path = ssp_dir.string();
 
     const uint64_t end_time = config.fmu.end_time;
     REQUIRE(end_time > 0);
 
-    ssp4sim::SimulationStepper stepper(std::move(config));
+    ssp4sim::SimulatorCore stepper(std::move(config));
 
     REQUIRE_FALSE(stepper.initialized());
     stepper.init();
@@ -634,7 +797,7 @@ TEST_CASE("stepper advances to an exact time and finishes", "[simulation][steppe
     REQUIRE_THROWS_AS(stepper.step(), std::logic_error);
 }
 
-TEST_CASE("stepper rejects a zero timestep at start", "[simulation][stepper]")
+TEST_CASE("SimulatorCore rejects a zero timestep at start", "[simulation][simulator_core]")
 {
     const fs::path ssp_dir = fixture_path("scenario");
     if (!fs::exists(ssp_dir / "SystemStructure.ssd"))
@@ -642,12 +805,12 @@ TEST_CASE("stepper rejects a zero timestep at start", "[simulation][stepper]")
         SKIP("requires the scenario SSP fixture");
     }
 
-    auto workdir = ssp4sim::tests::reference_ssp::project_root() / ".dynamic-harness" / "wd" / "stepper_zero";
+    auto workdir = ssp4sim::tests::reference_ssp::project_root() / ".dynamic-harness" / "wd" / "simulator_core_zero";
     auto config = make_lifecycle_config(workdir, 1.0, std::nullopt, false, 0.0);
     config.ssp_path = ssp_dir.string();
     REQUIRE(config.fmu.timestep == 0);
 
-    ssp4sim::SimulationStepper stepper(std::move(config));
+    ssp4sim::SimulatorCore stepper(std::move(config));
     stepper.init();
 
     REQUIRE_THROWS_AS(stepper.start(), std::runtime_error);

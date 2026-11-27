@@ -177,6 +177,17 @@ static PyObject *PySsp4simSimulator_resume_method(PyObject *self, PyObject *Py_U
     return status_to_none(ssp4sim_simulator_resume(sim->handle));
 }
 
+static PyObject *PySsp4simSimulator_reset_method(
+    PyObject *self, PyObject *Py_UNUSED(ignored))
+{
+    PySsp4simSimulator *sim = (PySsp4simSimulator *)self;
+    ssp4sim_status status;
+    Py_BEGIN_ALLOW_THREADS
+    status = ssp4sim_simulator_reset(sim->handle);
+    Py_END_ALLOW_THREADS
+    return status_to_none(status);
+}
+
 static PyObject *PySsp4simSimulator_stop_method(PyObject *self, PyObject *args, PyObject *kwargs)
 {
     static char *kwlist[] = {"at", NULL};
@@ -221,6 +232,64 @@ static PyObject *PySsp4simSimulator_set_speed_method(PyObject *self, PyObject *a
 
     const ssp4sim_status status =
         ssp4sim_simulator_set_speed(sim->handle, speed, has_at, at_ns);
+    return status_to_none(status);
+}
+
+static PyObject *PySsp4simSimulator_snapshot_method(PyObject *self, PyObject *args, PyObject *kwargs)
+{
+    static char *kwlist[] = {"path", NULL};
+    PyObject *path_object = NULL;
+    PySsp4simSimulator *sim = (PySsp4simSimulator *)self;
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O", kwlist, &path_object))
+    {
+        return NULL;
+    }
+
+    PyObject *path_bytes = NULL;
+    if (!PyUnicode_FSConverter(path_object, &path_bytes))
+    {
+        return NULL;
+    }
+
+    ssp4sim_simulator_handle *handle = sim->handle;
+    const char *path = PyBytes_AsString(path_bytes);
+    ssp4sim_status status;
+    Py_BEGIN_ALLOW_THREADS
+    status = ssp4sim_simulator_snapshot(handle, path);
+    Py_END_ALLOW_THREADS
+    Py_DECREF(path_bytes);
+
+    return status_to_none(status);
+}
+
+static PyObject *PySsp4simSimulator_restore_method(PyObject *self, PyObject *args, PyObject *kwargs)
+{
+    static char *kwlist[] = {"path", "start", NULL};
+    PyObject *path_object = NULL;
+    int start = 1;
+    PySsp4simSimulator *sim = (PySsp4simSimulator *)self;
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|p", kwlist, &path_object,
+                                     &start))
+    {
+        return NULL;
+    }
+
+    PyObject *path_bytes = NULL;
+    if (!PyUnicode_FSConverter(path_object, &path_bytes))
+    {
+        return NULL;
+    }
+
+    ssp4sim_simulator_handle *handle = sim->handle;
+    const char *path = PyBytes_AsString(path_bytes);
+    ssp4sim_status status;
+    Py_BEGIN_ALLOW_THREADS
+    status = ssp4sim_simulator_restore(handle, path, start);
+    Py_END_ALLOW_THREADS
+    Py_DECREF(path_bytes);
+
     return status_to_none(status);
 }
 
@@ -291,6 +360,13 @@ static PyMethodDef PySsp4simSimulator_methods[] = {
         PyDoc_STR("Resume a paused simulation.")
     },
     {
+        "reset",
+        (PyCFunction)PySsp4simSimulator_reset_method,
+        METH_NOARGS,
+        PyDoc_STR("Stop any run, discard per-run state, rebuild from the creation "
+                  "config, and leave the simulator initialized.")
+    },
+    {
         "stop",
         (PyCFunction)PySsp4simSimulator_stop_method,
         METH_VARARGS | METH_KEYWORDS,
@@ -303,6 +379,18 @@ static PyMethodDef PySsp4simSimulator_methods[] = {
         (PyCFunction)PySsp4simSimulator_set_speed_method,
         METH_VARARGS | METH_KEYWORDS,
         PyDoc_STR("Set the wall-clock speed; optional at (sim seconds) defers it.")
+    },
+    {
+        "snapshot",
+        (PyCFunction)PySsp4simSimulator_snapshot_method,
+        METH_VARARGS | METH_KEYWORDS,
+        PyDoc_STR("Block until a snapshot of the running simulation is written.")
+    },
+    {
+        "restore",
+        (PyCFunction)PySsp4simSimulator_restore_method,
+        METH_VARARGS | METH_KEYWORDS,
+        PyDoc_STR("Restore a snapshot into a fresh run; start defaults to True.")
     },
     {
         "info",
@@ -320,7 +408,9 @@ static PyMethodDef PySsp4simSimulator_methods[] = {
 };
 
 static PyType_Slot PySsp4simSimulator_slots[] = {
-    {Py_tp_doc, "SSP4SIM simulator wrapper."},
+    {Py_tp_doc, "SSP4SIM simulator wrapper exposing init, simulate, start, pause, "
+                "resume, reset, stop, set_speed, snapshot, restore, info, and "
+                "wait."},
     {Py_tp_new, (void *)PyType_GenericNew},
     {Py_tp_init, (void *)PySsp4simSimulator_init},
     {Py_tp_dealloc, (void *)PySsp4simSimulator_dealloc},

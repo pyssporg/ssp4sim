@@ -2,12 +2,15 @@
 
 #include "ssp4cpp/utils/log.hpp"
 
+#include "simulation/serialize/serialize.hpp"
+
 #include "ssp4sim_definitions.hpp"
 #include "utils/memory/allocator.hpp"
 
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -20,7 +23,7 @@ namespace ssp4sim::utils
      * Also tracks time of additions
      *
      */
-    class RingBuffer : public types::IWritable
+    class RingBuffer : public types::IWritable, public serialize::ISerialize
     {
 
     public:
@@ -45,6 +48,20 @@ namespace ssp4sim::utils
         std::size_t push();
 
         std::size_t push(std::uint64_t time);
+
+        void serialize(serialize::Writer &out) const override;
+
+        /// Write the same layout, emitting zero bytes for each range instead of
+        /// the live ring bytes. Ranges are offsets into the ring data.
+        void serialize(serialize::Writer &out,
+                       std::span<const serialize::ByteRange> zero_ranges) const;
+
+        void deserialize(serialize::Reader &in) override;
+
+        /// Read the same layout, copying all ring bytes except \p skip_ranges so
+        /// the live bytes at those offsets stay untouched.
+        void deserialize(serialize::Reader &in,
+                         std::span<const serialize::ByteRange> skip_ranges);
 
         // get data from an index, index is static from data start
         std::byte *get_item(std::size_t index, bool use_verification=true);

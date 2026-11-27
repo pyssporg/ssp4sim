@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 import signal
 import socket
 import subprocess
@@ -35,6 +36,17 @@ FIXTURE = (
     / "model"
 )
 
+DAHLQUIST = (
+    SSP4SIM_ROOT
+    / "resources"
+    / "reference_ssp"
+    / "artifacts"
+    / "models"
+    / "Dahlquist"
+    / "baseline"
+    / "model"
+)
+
 pytestmark = pytest.mark.skipif(
     not SSP4SIMD.exists(), reason="ssp4simd build artifact is missing"
 )
@@ -46,12 +58,16 @@ def build_config(
     stop_time: float = 3.0,
     speed: float = 1.0,
     timestep: float = 0.05,
+    fixture: Path | None = None,
+    ssd: str = "SystemStructure.ssd",
+    csv_file: Path | None = None,
+    snapshot_dir: Path | None = None,
 ) -> Path:
     workdir.mkdir(parents=True, exist_ok=True)
     config = {
         "simulation": {
-            "ssp": str(FIXTURE),
-            "ssd": "SystemStructure.ssd",
+            "ssp": str(fixture if fixture is not None else FIXTURE),
+            "ssd": ssd,
             "start_time": 0.0,
             "stop_time": stop_time,
             "timestep": timestep,
@@ -68,7 +84,9 @@ def build_config(
             "recording": {
                 "csv": {
                     "enable": True,
-                    "file": str(workdir / "result.csv"),
+                    "file": str(
+                        csv_file if csv_file is not None else workdir / "result.csv"
+                    ),
                     "interval": 0.0,
                 },
                 "wait_for": True,
@@ -83,6 +101,8 @@ def build_config(
             },
         }
     }
+    if snapshot_dir is not None:
+        config["simulation"]["snapshot"] = {"directory": str(snapshot_dir)}
     path = workdir / "config.json"
     path.write_text(json.dumps(config, indent=2))
     return path
@@ -97,9 +117,20 @@ class Daemon:
         stop_time: float = 3.0,
         speed: float = 1.0,
         timestep: float = 0.05,
+        fixture: Path | None = None,
+        ssd: str = "SystemStructure.ssd",
+        csv_file: Path | None = None,
+        snapshot_dir: Path | None = None,
     ) -> None:
         config_path = build_config(
-            workdir, stop_time=stop_time, speed=speed, timestep=timestep
+            workdir,
+            stop_time=stop_time,
+            speed=speed,
+            timestep=timestep,
+            fixture=fixture,
+            ssd=ssd,
+            csv_file=csv_file,
+            snapshot_dir=snapshot_dir,
         )
         self.workdir = workdir
         self.socket_path = socket_path
@@ -191,6 +222,28 @@ class Daemon:
             self.events.append(message)
         raise TimeoutError(f"timed out waiting for {name!r} event")
 
+    def wait_lifecycle(
+        self, operation: str, *, ok: bool = True, timeout: float = 30.0
+    ) -> dict:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            for index, event in enumerate(self.events):
+                if (
+                    event.get("event") == "lifecycle"
+                    and event.get("operation") == operation
+                    and event.get("ok") is ok
+                ):
+                    return self.events.pop(index)
+            message = self._read_message(max(0.01, deadline - time.monotonic()))
+            if (
+                message.get("event") == "lifecycle"
+                and message.get("operation") == operation
+                and message.get("ok") is ok
+            ):
+                return message
+            self.events.append(message)
+        raise TimeoutError(f"timed out waiting for {operation!r} lifecycle event")
+
     def close(self) -> None:
         if self.socket is not None:
             self.socket.close()
@@ -270,7 +323,11 @@ def test_lifecycle_and_shutdown(daemon: Daemon) -> None:
     done = daemon.wait_event("done")
     assert done["result"] == "stopped", done
 
-    assert daemon.response({"v": 1, "id": 11, "cmd": "reset"})["ok"]
+    reset = daemon.response({"v": 1, "id": 11, "cmd": "reset"})
+    assert reset["ok"] and reset["accepted"], reset
+    lifecycle = daemon.wait_lifecycle("reset")
+    assert lifecycle["state"] == "initialized", lifecycle
+    assert lifecycle["sim_time"] == 0.0, lifecycle
     state = daemon.response({"v": 1, "id": 12, "cmd": "state"})
     assert state["state"] == "initialized", state
     assert state["sim_time"] == 0.0, state
@@ -304,7 +361,9 @@ def test_reset_while_running(daemon: Daemon) -> None:
         running = daemon.wait_event("state")
 
     reset = daemon.response({"v": 1, "id": 19, "cmd": "reset"}, timeout=10.0)
-    assert reset["ok"], reset
+    assert reset["ok"] and reset["accepted"], reset
+    lifecycle = daemon.wait_lifecycle("reset")
+    assert lifecycle["state"] == "initialized", lifecycle
 
     # The old live run reports its terminal events before the fresh state.
     stopped = daemon.wait_event("state")
@@ -321,6 +380,26 @@ def test_reset_while_running(daemon: Daemon) -> None:
     assert state["state"] == "initialized", state
     assert state["sim_time"] == 0.0, state
     assert state["speed"] == 1.0, state
+
+
+def test_reset_is_async_and_reports_lifecycle(daemon: Daemon) -> None:
+    assert daemon.response({"v": 1, "id": 30, "cmd": "start"})["ok"]
+
+    running = daemon.wait_event("state")
+    while running["state"] != "running":
+        running = daemon.wait_event("state")
+
+    reset = daemon.response({"v": 1, "id": 31, "cmd": "reset"}, timeout=10.0)
+    assert reset["ok"] and reset["accepted"], reset
+
+    lifecycle = daemon.wait_lifecycle("reset")
+    assert lifecycle["state"] == "initialized", lifecycle
+    assert lifecycle["sim_time"] == 0.0, lifecycle
+
+    state = daemon.response({"v": 1, "id": 32, "cmd": "state"})
+    assert state["ok"], state
+    assert state["state"] == "initialized", state
+    assert state["sim_time"] == 0.0, state
 
 
 def test_sigterm_unlinks_socket(tmp_path: Path) -> None:
@@ -551,5 +630,452 @@ def test_shutdown_immediately_after_start(tmp_path: Path) -> None:
                 if m.get("event") == "state" and m.get("state") == "stopped"
             ]
             assert terminal_states, messages
+        finally:
+            instance.shutdown()
+
+
+def test_snapshot_and_restore(tmp_path: Path) -> None:
+    if not DAHLQUIST.exists():
+        pytest.skip(f"missing reference fixture: {DAHLQUIST}")
+
+    with tempfile.TemporaryDirectory(prefix="ssp4simd-") as socket_dir:
+        socket_path = Path(socket_dir) / "s.sock"
+        snapshot_path = tmp_path / "run.snap"
+        instance = Daemon(
+            tmp_path / "snapshot",
+            socket_path,
+            stop_time=2.0,
+            speed=1.0,
+            timestep=0.01,
+            fixture=DAHLQUIST,
+            csv_file=tmp_path / "dahlquist.csv",
+        )
+        try:
+            assert instance.response({"v": 1, "id": 100, "cmd": "start"})["ok"]
+            running = instance.wait_event("state")
+            while running["state"] != "running":
+                running = instance.wait_event("state")
+
+            response = instance.response(
+                {"v": 1, "id": 101, "cmd": "snapshot", "path": str(snapshot_path)}
+            )
+            assert response["ok"] and response["accepted"], response
+
+            event = instance.wait_event("snapshot", timeout=15.0)
+            assert event["ok"], event
+            assert event["models_done"] == event["models_total"], event
+            assert event["models_total"] >= 1, event
+            assert snapshot_path.exists()
+
+            assert instance.response({"v": 1, "id": 102, "cmd": "stop"})["ok"]
+            done = instance.wait_event("done")
+            while done["result"] != "stopped":
+                done = instance.wait_event("done")
+
+            response = instance.response(
+                {
+                    "v": 1,
+                    "id": 103,
+                    "cmd": "restore",
+                    "path": str(snapshot_path),
+                    "start": True,
+                },
+                timeout=30.0,
+            )
+            assert response["ok"] and response["accepted"], response
+            lifecycle = instance.wait_lifecycle("restore")
+            assert lifecycle["state"] == "running", lifecycle
+            assert lifecycle["sim_time"] >= event["sim_time"], (
+                lifecycle,
+                event,
+            )
+
+            resumed = instance.wait_event("state")
+            while resumed["state"] != "running":
+                resumed = instance.wait_event("state")
+
+            assert instance.response({"v": 1, "id": 104, "cmd": "shutdown"})["ok"]
+            assert instance.process.wait(timeout=20) == 0
+        finally:
+            instance.shutdown()
+
+
+def test_restore_start_false_is_async(tmp_path: Path) -> None:
+    if not DAHLQUIST.exists():
+        pytest.skip(f"missing reference fixture: {DAHLQUIST}")
+
+    with tempfile.TemporaryDirectory(prefix="ssp4simd-") as socket_dir:
+        socket_path = Path(socket_dir) / "s.sock"
+        snapshot_path = tmp_path / "start-false.snap"
+        instance = Daemon(
+            tmp_path / "start-false",
+            socket_path,
+            stop_time=5.0,
+            speed=1.0,
+            timestep=0.01,
+            fixture=DAHLQUIST,
+            csv_file=tmp_path / "start-false.csv",
+        )
+        try:
+            assert instance.response({"v": 1, "id": 105, "cmd": "start"})["ok"]
+            running = instance.wait_event("state")
+            while running["state"] != "running":
+                running = instance.wait_event("state")
+
+            response = instance.response(
+                {"v": 1, "id": 106, "cmd": "snapshot", "path": str(snapshot_path)}
+            )
+            assert response["ok"] and response["accepted"], response
+            event = instance.wait_event("snapshot", timeout=15.0)
+            assert event["ok"], event
+
+            response = instance.response(
+                {
+                    "v": 1,
+                    "id": 107,
+                    "cmd": "restore",
+                    "path": str(snapshot_path),
+                    "start": False,
+                },
+                timeout=30.0,
+            )
+            assert response["ok"] and response["accepted"], response
+            lifecycle = instance.wait_lifecycle("restore")
+            assert lifecycle["state"] == "initialized", lifecycle
+            assert lifecycle["sim_time"] >= event["sim_time"], (
+                lifecycle,
+                event,
+            )
+
+            # The lifecycle event also marks the handoff, so start is accepted
+            # again once it arrives.
+            state = instance.response({"v": 1, "id": 108, "cmd": "state"})
+            assert state["state"] == "initialized", state
+
+            assert instance.response({"v": 1, "id": 109, "cmd": "start"})["ok"]
+            resumed = instance.wait_event("state")
+            while resumed["state"] != "running":
+                resumed = instance.wait_event("state")
+            assert resumed["state"] == "running"
+        finally:
+            instance.shutdown()
+
+
+def test_snapshot_while_paused(tmp_path: Path) -> None:
+    if not DAHLQUIST.exists():
+        pytest.skip(f"missing reference fixture: {DAHLQUIST}")
+
+    with tempfile.TemporaryDirectory(prefix="ssp4simd-") as socket_dir:
+        socket_path = Path(socket_dir) / "s.sock"
+        snapshot_path = tmp_path / "paused.snap"
+        instance = Daemon(
+            tmp_path / "snapshot-paused",
+            socket_path,
+            stop_time=2.0,
+            speed=1.0,
+            timestep=0.01,
+            fixture=DAHLQUIST,
+            csv_file=tmp_path / "dahlquist-paused.csv",
+        )
+        try:
+            assert instance.response({"v": 1, "id": 110, "cmd": "start"})["ok"]
+            running = instance.wait_event("state")
+            while running["state"] != "running":
+                running = instance.wait_event("state")
+
+            assert instance.response({"v": 1, "id": 111, "cmd": "pause"})["ok"]
+            paused = instance.wait_event("state")
+            while paused["state"] != "paused":
+                paused = instance.wait_event("state")
+            assert paused["state"] == "paused"
+
+            response = instance.response(
+                {"v": 1, "id": 112, "cmd": "snapshot", "path": str(snapshot_path)}
+            )
+            assert response["ok"] and response["accepted"], response
+
+            # The response only accepts the request; completion arrives as an
+            # event once the worker drains the event queue.
+            event = instance.wait_event("snapshot", timeout=15.0)
+            assert event["ok"], event
+            assert event["path"] == str(snapshot_path)
+            assert snapshot_path.exists(), event
+        finally:
+            instance.shutdown()
+
+
+
+def test_snapshot_events_carry_request_ids(tmp_path: Path) -> None:
+    if not DAHLQUIST.exists():
+        pytest.skip(f"missing reference fixture: {DAHLQUIST}")
+
+    with tempfile.TemporaryDirectory(prefix="ssp4simd-") as socket_dir:
+        socket_path = Path(socket_dir) / "s.sock"
+        first = tmp_path / "first.snap"
+        second = tmp_path / "second.snap"
+        instance = Daemon(
+            tmp_path / "correlated",
+            socket_path,
+            stop_time=5.0,
+            speed=1.0,
+            timestep=0.01,
+            fixture=DAHLQUIST,
+            csv_file=tmp_path / "correlated.csv",
+        )
+        try:
+            assert instance.response({"v": 1, "id": 200, "cmd": "start"})["ok"]
+            running = instance.wait_event("state")
+            while running["state"] != "running":
+                running = instance.wait_event("state")
+
+            assert instance.response({"v": 1, "id": 201, "cmd": "pause"})["ok"]
+            paused = instance.wait_event("state")
+            while paused["state"] != "paused":
+                paused = instance.wait_event("state")
+
+            for request_id, path in ((201, first), (202, second)):
+                response = instance.response(
+                    {"v": 1, "id": request_id, "cmd": "snapshot", "path": str(path)}
+                )
+                assert response["ok"] and response["accepted"], response
+
+            events = [instance.wait_event("snapshot") for _ in range(2)]
+            by_id = {event.get("id"): event for event in events}
+            assert set(by_id) == {201, 202}, events
+            assert by_id[201]["path"] == str(first), events
+            assert by_id[202]["path"] == str(second), events
+            assert all(event["ok"] and event["code"] == "ok" for event in events), events
+            assert first.exists() and second.exists()
+        finally:
+            instance.shutdown()
+
+
+def test_snapshot_path_policy(tmp_path: Path) -> None:
+    if not DAHLQUIST.exists():
+        pytest.skip(f"missing reference fixture: {DAHLQUIST}")
+
+    snaps = tmp_path / "snaps"
+    snaps.mkdir()
+    outside = tmp_path / "outside.snap"
+    inside = snaps / "inside.snap"
+    external = tmp_path / "external"
+    external.mkdir()
+    escaping_link = snaps / "escape"
+    escaping_link.symlink_to(external, target_is_directory=True)
+
+    with tempfile.TemporaryDirectory(prefix="ssp4simd-") as socket_dir:
+        socket_path = Path(socket_dir) / "s.sock"
+        instance = Daemon(
+            tmp_path / "policy",
+            socket_path,
+            stop_time=5.0,
+            speed=1.0,
+            timestep=0.01,
+            fixture=DAHLQUIST,
+            csv_file=tmp_path / "policy.csv",
+            snapshot_dir=snaps,
+        )
+        try:
+            assert instance.response({"v": 1, "id": 205, "cmd": "start"})["ok"]
+            running = instance.wait_event("state")
+            while running["state"] != "running":
+                running = instance.wait_event("state")
+
+            rejected = instance.response(
+                {"v": 1, "id": 206, "cmd": "snapshot", "path": str(outside)}
+            )
+            assert rejected["ok"] is False, rejected
+            assert rejected["error"]["code"] == "bad_value", rejected
+
+            symlinked = instance.response(
+                {
+                    "v": 1,
+                    "id": 209,
+                    "cmd": "snapshot",
+                    "path": str(escaping_link / "escape.snap"),
+                }
+            )
+            assert symlinked["ok"] is False, symlinked
+            assert symlinked["error"]["code"] == "bad_value", symlinked
+
+            accepted = instance.response(
+                {"v": 1, "id": 207, "cmd": "snapshot", "path": str(inside)}
+            )
+            assert accepted["ok"] and accepted["accepted"], accepted
+            event = instance.wait_event("snapshot")
+            assert event["ok"] and event["id"] == 207, event
+            assert inside.exists()
+
+            restore = instance.response(
+                {
+                    "v": 1,
+                    "id": 208,
+                    "cmd": "restore",
+                    "path": str(outside),
+                    "start": False,
+                }
+            )
+            assert restore["ok"] is False, restore
+            assert restore["error"]["code"] == "bad_value", restore
+        finally:
+            instance.shutdown()
+
+
+def test_restore_writes_uuid_csv_segment(tmp_path: Path) -> None:
+    if not DAHLQUIST.exists():
+        pytest.skip(f"missing reference fixture: {DAHLQUIST}")
+
+    original = tmp_path / "segment.csv"
+    snapshot_path = tmp_path / "segment.snap"
+
+    with tempfile.TemporaryDirectory(prefix="ssp4simd-") as socket_dir:
+        socket_path = Path(socket_dir) / "s.sock"
+        instance = Daemon(
+            tmp_path / "segment",
+            socket_path,
+            stop_time=2.0,
+            speed=1.0,
+            timestep=0.01,
+            fixture=DAHLQUIST,
+            csv_file=original,
+        )
+        try:
+            assert instance.response({"v": 1, "id": 210, "cmd": "start"})["ok"]
+            running = instance.wait_event("state")
+            while running["state"] != "running":
+                running = instance.wait_event("state")
+
+            assert instance.response(
+                {"v": 1, "id": 211, "cmd": "snapshot", "path": str(snapshot_path)}
+            )["ok"]
+            event = instance.wait_event("snapshot")
+            assert event["ok"], event
+
+            response = instance.response(
+                {
+                    "v": 1,
+                    "id": 212,
+                    "cmd": "restore",
+                    "path": str(snapshot_path),
+                    "start": True,
+                },
+                timeout=30.0,
+            )
+            assert response["ok"] and response["accepted"], response
+            lifecycle = instance.wait_lifecycle("restore")
+            assert lifecycle["ok"], lifecycle
+
+            assert original.exists(), "the prior run's CSV must be preserved"
+            segments = list(tmp_path.glob("segment.restored-*.csv"))
+            assert len(segments) == 1, segments
+            uuid = re.fullmatch(
+                r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-"
+                r"[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+                segments[0].stem.removeprefix("segment.restored-"),
+            )
+            assert uuid, segments[0].name
+        finally:
+            instance.shutdown()
+
+
+def test_restore_preserves_prior_speed(tmp_path: Path) -> None:
+    if not DAHLQUIST.exists():
+        pytest.skip(f"missing reference fixture: {DAHLQUIST}")
+
+    snapshot_path = tmp_path / "speed.snap"
+
+    with tempfile.TemporaryDirectory(prefix="ssp4simd-") as socket_dir:
+        socket_path = Path(socket_dir) / "s.sock"
+        instance = Daemon(
+            tmp_path / "speed",
+            socket_path,
+            stop_time=5.0,
+            speed=2.0,
+            timestep=0.01,
+            fixture=DAHLQUIST,
+            csv_file=tmp_path / "speed.csv",
+        )
+        try:
+            assert instance.response({"v": 1, "id": 220, "cmd": "start"})["ok"]
+            running = instance.wait_event("state")
+            while running["state"] != "running":
+                running = instance.wait_event("state")
+
+            assert instance.response(
+                {"v": 1, "id": 221, "cmd": "snapshot", "path": str(snapshot_path)}
+            )["ok"]
+            event = instance.wait_event("snapshot")
+            assert event["ok"], event
+
+            response = instance.response(
+                {
+                    "v": 1,
+                    "id": 222,
+                    "cmd": "restore",
+                    "path": str(snapshot_path),
+                    "start": True,
+                },
+                timeout=30.0,
+            )
+            assert response["ok"] and response["accepted"], response
+            lifecycle = instance.wait_lifecycle("restore")
+            assert lifecycle["state"] == "running", lifecycle
+
+            state = instance.response({"v": 1, "id": 223, "cmd": "state"})
+            assert state["ok"], state
+            assert state["speed"] == pytest.approx(2.0), state
+        finally:
+            instance.shutdown()
+
+
+def test_reset_installs_fresh_runner(tmp_path: Path) -> None:
+    if not DAHLQUIST.exists():
+        pytest.skip(f"missing reference fixture: {DAHLQUIST}")
+
+    before = tmp_path / "before.snap"
+    after = tmp_path / "after.snap"
+
+    with tempfile.TemporaryDirectory(prefix="ssp4simd-") as socket_dir:
+        socket_path = Path(socket_dir) / "s.sock"
+        instance = Daemon(
+            tmp_path / "reset-fresh",
+            socket_path,
+            stop_time=5.0,
+            speed=1.0,
+            timestep=0.01,
+            fixture=DAHLQUIST,
+            csv_file=tmp_path / "reset-fresh.csv",
+        )
+        try:
+            assert instance.response({"v": 1, "id": 240, "cmd": "start"})["ok"]
+            running = instance.wait_event("state")
+            while running["state"] != "running":
+                running = instance.wait_event("state")
+
+            assert instance.response(
+                {"v": 1, "id": 241, "cmd": "snapshot", "path": str(before)}
+            )["ok"]
+            event = instance.wait_event("snapshot", timeout=15.0)
+            assert event["code"] == "ok", event
+
+            reset = instance.response({"v": 1, "id": 242, "cmd": "reset"})
+            assert reset["ok"] and reset["accepted"], reset
+            lifecycle = instance.wait_lifecycle("reset")
+            assert lifecycle["state"] == "initialized", lifecycle
+            assert lifecycle["sim_time"] == 0.0, lifecycle
+
+            assert instance.response({"v": 1, "id": 243, "cmd": "start"})["ok"]
+            running = instance.wait_event("state")
+            while running["state"] != "running":
+                running = instance.wait_event("state")
+
+            assert instance.response(
+                {"v": 1, "id": 244, "cmd": "snapshot", "path": str(after)}
+            )["ok"]
+            event = instance.wait_event("snapshot", timeout=15.0)
+            assert event["code"] == "ok", event
+            assert event["models_total"] >= 1, event
+            assert event["models_done"] == event["models_total"], event
+            assert after.exists()
         finally:
             instance.shutdown()

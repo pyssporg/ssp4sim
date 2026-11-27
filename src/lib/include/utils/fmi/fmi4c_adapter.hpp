@@ -4,9 +4,12 @@
 
 #include <fmi4c.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string>
+#include <vector>
 #include <filesystem>
 
 namespace ssp4sim::handler
@@ -40,9 +43,19 @@ namespace ssp4sim::handler
 
         [[nodiscard]] const std::string &instance_name() const;
 
+        [[nodiscard]] bool can_get_and_set_state() const;
+
+        [[nodiscard]] bool can_serialize_state() const;
+
+        [[nodiscard]] const std::string &guid() const;
+
+        [[nodiscard]] const std::string &model_identifier() const;
+
     private:
         std::string fmu_path_;
         std::string instance_name_;
+        std::string guid_;
+        std::string model_identifier_;
         fmuHandle *handle_ = nullptr;
         fmiVersion_t version_ = fmiVersionUnknown;
     };
@@ -86,6 +99,12 @@ namespace ssp4sim::handler
         uint64_t step_until(uint64_t stop_time);
 
         bool step(uint64_t step_size);
+
+        std::vector<std::byte> serialize_fmu_state();
+
+        void restore_fmu_state(std::span<const std::byte> serialized);
+
+        void set_current_time(uint64_t time_ns);
 
         bool terminate();
 

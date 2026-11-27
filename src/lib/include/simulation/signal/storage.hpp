@@ -1,5 +1,7 @@
 #pragma once
 
+#include "simulation/serialize/serialize.hpp"
+
 #include "utils/primitives/ring_buffer.hpp"
 
 #include "pre/1_ssp_parser/schema_extensions/FMI2_Enums_Ext.hpp"
@@ -55,8 +57,16 @@ namespace ssp4sim::signal
     };
     using Callback = void (*)(void *, NewDataEvent);
 
+    /// One in-place string slot in the ring: where it lives and its byte range.
+    struct StringSlot
+    {
+        std::size_t area = 0;
+        std::size_t index = 0;
+        serialize::ByteRange range;
+    };
 
-    class SignalStorage : public types::IWritable
+
+    class SignalStorage : public types::IWritable, public serialize::ISerialize
     {
     public:
         ssp4cpp::utils::log::Logger *log = nullptr;
@@ -70,6 +80,8 @@ namespace ssp4sim::signal
 
         std::vector<SignalInfo> variables;
         size_t area_byte_size = 0;
+        std::size_t string_variable_count = 0;
+        std::vector<StringSlot> string_slots; // built once in allocate()
 
         std::vector<std::vector<std::byte *>> locations;            // absolute location in memory
         std::vector<std::vector<std::byte *>> derivative_locations; // absolute location in memory
@@ -86,6 +98,16 @@ namespace ssp4sim::signal
         void allocate();
 
         size_t push(uint64_t time);
+
+        /// True if any stored variable is an FMI string. Raw ring bytes cannot
+        /// save or restore in-place std::string objects.
+        bool has_string_variables() const noexcept;
+
+        /// Byte ranges of all in-place string slots, in area/variable order.
+        std::vector<serialize::ByteRange> string_ranges() const;
+
+        void serialize(serialize::Writer &out) const override;
+        void deserialize(serialize::Reader &in) override;
 
         size_t get_or_push(uint64_t time);
 

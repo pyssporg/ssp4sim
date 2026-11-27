@@ -1,19 +1,19 @@
 classDiagram
 
 class Simulator {
-    Public compatibility facade over ThreadedRunner: owns setup, control, and query access; start() blocks until running or terminal.
+    The async runtime: owns the worker thread, command queue, pacing, RunState including Stopping, start barrier, wait, and terminal result. Drives SimulatorCore and RunControl; start() blocks until running or terminal. snapshot() posts one run-thread task and blocks; no snapshot service or correlation state lives here.
 }
 
-class ThreadedRunner {
-    Owns the only async layer: worker thread, command queue, pacing, RunState including Stopping, start barrier, wait, and terminal result. Drives SimulationStepper and RunControl.
+class SimulatorCore {
+    Synchronous core: owns SSP import, graph, executors, recorder, simulation time, snapshot save/load, and one macro step; no thread, pacing, RunState, or command queue.
 }
 
-class SimulationStepper {
-    Synchronous core: owns SSP import, graph, executors, recorder, simulation time, and one macro step; no thread, pacing, RunState, or command queue.
+class SimulationRuntime {
+    Owns the simulation side: the synchronous SimulatorCore, the run thread and future, the outer macro-step loop, and the single RunControl queue/status object; marshals snapshots onto the run thread.
 }
 
 class RunControl {
-    Single owner of the run-control state machine: one mutex guards the plain state, time, speed, and pacing fields, and one ordered command queue.
+    Single shared interface between caller and run thread: one mutex and one condition variable guard the lifecycle state, PacingClock (simulation time, speed, pacing anchors, deadline math), and one time-ordered multimap of commands and run work. next_action() is the single loop gate; immediate control mutates state under the same lock, and info() is the status readback.
 }
 
 class FmuHandler {
@@ -77,14 +77,14 @@ class SignalStorage {
     Allocates contiguous memory areas and metadata for stored signals.
 }
 
-Simulator *-- ThreadedRunner
-ThreadedRunner *-- RunControl
-ThreadedRunner *-- SimulationStepper
-SimulationStepper *-- FmuHandler
-SimulationStepper *-- DataRecorder
-SimulationStepper *-- Graph
-SimulationStepper *--  GraphBuilder
-SimulationStepper *--  AnalysisGraphBuilder
+Simulator *-- SimulationRuntime
+SimulationRuntime *-- RunControl
+SimulationRuntime *-- SimulatorCore
+SimulatorCore *-- FmuHandler
+SimulatorCore *-- DataRecorder
+SimulatorCore *-- Graph
+SimulatorCore *--  GraphBuilder
+SimulatorCore *--  AnalysisGraphBuilder
 AnalysisGraph --> GraphBuilder
 
 FmuHandler *-- "many" FmuInfo

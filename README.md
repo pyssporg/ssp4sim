@@ -58,7 +58,7 @@ sim.init()
 sim.simulate()
 ```
 
-`Simulator` also exposes `start()`, `pause()`, `resume()`, `stop()`,
+`Simulator` also exposes `start()`, `pause()`, `resume()`, `reset()`, `stop()`,
 `set_speed()`, `info()`, and `wait()`; `start()` blocks until the run
 is running or terminal, and `simulate()` remains `start()` followed by `wait()`.
 `info()` is the sole read-back and returns one coherent

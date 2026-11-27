@@ -234,6 +234,83 @@ namespace ssp4sim::graph
         return current_time;
     }
 
+    void FmuModel::serialize(serialize::Writer &out) const
+    {
+        if (!fmu || !fmu->fmi_instance || !fmu->model)
+        {
+            throw serialize::Error("serialize: model '" + name + "' has no FMU instance");
+        }
+        if (!input_area || !output_area)
+        {
+            throw serialize::Error("serialize: model '" + name +
+                                   "' is missing an input or output storage");
+        }
+
+        const auto &instance = *fmu->fmi_instance;
+        const std::string field_prefix = "model '" + name + "' ";
+        serialize::write_text(out, instance.instance_name(),
+                              field_prefix + "instance_name");
+        serialize::write_text(out, instance.guid(), field_prefix + "guid");
+        serialize::write_text(out, instance.model_identifier(),
+                              field_prefix + "model_identifier");
+        out.write_u64(current_time);
+
+        const std::vector<std::byte> state = fmu->model->serialize_fmu_state();
+        out.write_blob(std::span<const std::byte>(state));
+
+        input_area->serialize(out);
+        output_area->serialize(out);
+    }
+
+    void FmuModel::deserialize(serialize::Reader &in)
+    {
+        const std::string field_prefix = "model '" + name + "' ";
+        const std::string instance_name =
+            serialize::read_text(in, field_prefix + "instance_name");
+        const std::string guid =
+            serialize::read_text(in, field_prefix + "guid");
+        const std::string model_identifier =
+            serialize::read_text(in, field_prefix + "model_identifier");
+        const std::uint64_t current_time_ns = in.read_u64();
+
+        const auto state_span = in.read_blob();
+
+        if (!fmu || !fmu->fmi_instance || !fmu->model)
+        {
+            throw serialize::Error("serialize: model '" + name + "' has no FMU instance");
+        }
+
+        const auto &instance = *fmu->fmi_instance;
+        serialize::require_equal(field_prefix + "instance_name",
+                                 instance.instance_name(), instance_name);
+        serialize::require_equal(field_prefix + "guid", instance.guid(), guid);
+        serialize::require_equal(field_prefix + "model_identifier",
+                                 instance.model_identifier(),
+                                 model_identifier);
+        if (!input_area || !output_area)
+        {
+            throw serialize::Error("serialize: model '" + name +
+                                   "' is missing an input or output storage");
+        }
+
+        try
+        {
+            fmu->model->restore_fmu_state(state_span);
+            fmu->model->set_current_time(current_time_ns);
+            current_time = current_time_ns;
+            input_area->deserialize(in);
+            output_area->deserialize(in);
+        }
+        catch (const serialize::Error &)
+        {
+            throw;
+        }
+        catch (const std::exception &error)
+        {
+            throw serialize::Error(error.what());
+        }
+    }
+
     uint64_t FmuModel::invoke(StepData step_data)
     {
         return step(step_data);

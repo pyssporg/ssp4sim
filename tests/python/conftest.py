@@ -19,3 +19,7 @@ PYTHON_API_BUILD = SSP4SIM_ROOT / "build" / "src" / "public" / "python_api"
 
 if PYTHON_API_BUILD.exists():
     sys.path.insert(0, str(PYTHON_API_BUILD))
+
+
+def pytest_collection_modifyitems(session, config, items):
+    config._ssp4sim_multi_item = len(items) > 1

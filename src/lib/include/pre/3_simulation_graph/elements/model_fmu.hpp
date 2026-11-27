@@ -9,6 +9,8 @@
 
 #include "signal/storage.hpp"
 
+#include "simulation/serialize/serialize.hpp"
+
 #include "shared_config.hpp"
 
 #include "utils/fmi/fmu_info.hpp"
@@ -30,7 +32,7 @@ namespace ssp4sim::scheduling
 namespace ssp4sim::graph
 {
 
-    class FmuModel final : public Invocable
+    class FmuModel final : public Invocable, public serialize::ISerialize
     {
     public:
 
@@ -82,6 +84,9 @@ namespace ssp4sim::graph
         void post(uint64_t time);
 
         uint64_t step(StepData step_data);
+
+        void serialize(serialize::Writer &out) const override;
+        void deserialize(serialize::Reader &in) override;
 
         uint64_t invoke(StepData step_data) override final;
     };

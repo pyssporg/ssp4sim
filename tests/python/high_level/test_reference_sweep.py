@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 from ._helpers import (
     SOURCE_SSP_ROOT,
+    SSP4SIM_ROOT,
     assert_has_log_file,
     reference_params,
     run_reference_ssp,
@@ -67,12 +71,23 @@ for _param in reference_params() + [
 
 
 @pytest.mark.parametrize("ssp_root", PARAMETRIZED_SSP_ROOTS)
-def test_reference_ssp_fully_simulates(ssp_root: Path, tmp_path: Path) -> None:
+def test_reference_ssp_fully_simulates(
+    ssp_root: Path, tmp_path: Path, request: pytest.FixtureRequest
+) -> None:
     """Description: For each co-simulation SSP, run simulation and verify output.
     Rationale: Core regression suite — every reference SSP must simulate without
     crashing and produce output.
     Creep flag: dcmotor nested SSP is hardcoded outside the discovery mechanism,
     creating two code paths for parameter generation.
     """
+    multi = getattr(request.config, "_ssp4sim_multi_item", False)
+    if multi and os.environ.get("SSP4SIM_SWEEP_CHILD") != "1":
+        subprocess.run(
+            [sys.executable, "-m", "pytest", "-q", "--runxfail", request.node.nodeid],
+            cwd=SSP4SIM_ROOT,
+            check=True,
+            env={**os.environ, "SSP4SIM_SWEEP_CHILD": "1"},
+        )
+        return
     workdir = run_reference_ssp(ssp_root, tmp_path)
     assert_has_log_file(workdir)

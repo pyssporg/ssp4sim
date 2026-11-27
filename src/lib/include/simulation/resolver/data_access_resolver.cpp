@@ -8,9 +8,22 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <stdexcept>
+#include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
+
+namespace
+{
+    struct Entry
+    {
+        std::string name;
+        std::uint64_t committed_count = 0;
+        std::uint64_t committed_time = 0;
+        std::size_t latest_area = 0;
+    };
+}
 
 namespace ssp4sim::graph
 {
@@ -83,6 +96,10 @@ namespace ssp4sim::scheduling
         std::vector<std::vector<RegisteredEdge>> edges;                 // [model_id][connection_id]
         std::vector<std::unique_ptr<detail::ModelStatus>> status;       // [producer id], nullptr = unregistered
 
+        // Stable producer name -> Node id, for snapshot/restore across a fresh
+        // runner (Node ids are process-local).
+        std::unordered_map<std::string, std::size_t> producer_by_name;
+
         // Fallback for source storages with no registered owner (unlinked, uc-14):
         // never committed, so every policy resolves them to invalid (D2/D13 gate).
         detail::ModelStatus never_committed{};
@@ -99,9 +116,9 @@ namespace ssp4sim::scheduling
     // ------------------------------------------------------------------
     DataAccessResolver::DataAccessResolver(std::vector<Invocable *> nodes,
                                            AccessMode default_mode)
-        : s_(new DataAccessResolver::State)
     {
         std::unordered_map<ssp4sim::signal::SignalStorage *, std::size_t> owner;
+        std::unordered_map<std::string, std::size_t> producer_by_name;
 
         // Pass 1: register ownership + the status row for each producer.
         for (const auto &node : nodes)
@@ -112,7 +129,17 @@ namespace ssp4sim::scheduling
                 continue;
             }
             owner.emplace(fmu->output_area.get(), static_cast<std::size_t>(fmu->id));
+
+            // Graph names are unique; a collision here is a broken invariant.
+            if (!producer_by_name.emplace(fmu->name, static_cast<std::size_t>(fmu->id)).second)
+            {
+                throw std::runtime_error(
+                    "DataAccessResolver: duplicate producer name '" + fmu->name + "'");
+            }
         }
+
+        s_ = new DataAccessResolver::State;
+        s_->producer_by_name = std::move(producer_by_name);
 
         // Tables are indexed by the process-wide Node id; size them to the
         // exclusive bound once — unused slots (non-model / executor ids) are
@@ -217,6 +244,113 @@ namespace ssp4sim::scheduling
         frontier->committed_time.store(output_time, std::memory_order::release);
         frontier->latest_area.store(area, std::memory_order::release);
         frontier->committed_count.fetch_add(1, std::memory_order::release);
+    }
+
+    // ------------------------------------------------------------------
+    // Per-producer committed frontiers. These are the resolver facts FMI state
+    // does not cover. Producers are identified by their stable graph name
+    // because Node ids are process-local.
+    // ------------------------------------------------------------------
+    void DataAccessResolver::serialize(serialize::Writer &out) const
+    {
+        std::vector<Entry> entries;
+        if (s_ != nullptr)
+        {
+            std::vector<std::pair<std::string, std::size_t>> producers;
+            producers.reserve(s_->producer_by_name.size());
+            for (const auto &[name, id] : s_->producer_by_name)
+            {
+                producers.emplace_back(name, id);
+            }
+            std::sort(producers.begin(), producers.end(),
+                      [](const auto &a, const auto &b)
+                      {
+                          return a.first < b.first;
+                      });
+
+            entries.reserve(producers.size());
+            for (const auto &[name, id] : producers)
+            {
+                if (id >= s_->status.size() || s_->status[id] == nullptr)
+                {
+                    continue;
+                }
+                const detail::ModelStatus &frontier = *s_->status[id];
+                entries.push_back(
+                    {name,
+                     frontier.committed_count.load(std::memory_order::acquire),
+                     frontier.committed_time.load(std::memory_order::acquire),
+                     frontier.latest_area.load(std::memory_order::acquire)});
+            }
+        }
+
+        serialize::write_size(out, entries.size());
+        for (const Entry &entry : entries)
+        {
+            serialize::write_text(out, entry.name, "resolver.frontier.name");
+            out.write_u64(entry.committed_count);
+            out.write_u64(entry.committed_time);
+            serialize::write_size(out, entry.latest_area);
+        }
+    }
+
+    void DataAccessResolver::deserialize(serialize::Reader &in)
+    {
+        const std::size_t frontier_count =
+            serialize::read_count(in, 4 * sizeof(std::uint64_t));
+
+        std::vector<Entry> entries;
+        entries.reserve(frontier_count);
+        for (std::size_t i = 0; i < frontier_count; ++i)
+        {
+            Entry entry;
+            entry.name = serialize::read_text(in, "resolver.frontier.name");
+            entry.committed_count = in.read_u64();
+            entry.committed_time = in.read_u64();
+            entry.latest_area = serialize::read_size(in);
+            entries.push_back(std::move(entry));
+        }
+
+        if (entries.empty())
+        {
+            return;
+        }
+        if (s_ == nullptr)
+        {
+            throw serialize::Error(
+                "serialize: DataAccessResolver has no state");
+        }
+
+        std::vector<detail::ModelStatus *> targets;
+        targets.reserve(entries.size());
+        for (const Entry &entry : entries)
+        {
+            const auto it = s_->producer_by_name.find(entry.name);
+            if (it == s_->producer_by_name.end())
+            {
+                throw serialize::Error(
+                    "serialize: unknown producer name '" + entry.name + "'");
+            }
+            if (it->second >= s_->status.size() || s_->status[it->second] == nullptr)
+            {
+                throw serialize::Error(
+                    "serialize: no frontier for producer '" + entry.name + "'");
+            }
+            targets.push_back(s_->status[it->second].get());
+        }
+
+        // Match mark_committed's publication order: count last, so a reader
+        // that acquires on the count sees the restored frontier.
+        for (std::size_t i = 0; i < entries.size(); ++i)
+        {
+            detail::ModelStatus &frontier = *targets[i];
+            frontier.committed_time.store(entries[i].committed_time,
+                                          std::memory_order::release);
+            frontier.latest_area.store(entries[i].latest_area,
+                                       std::memory_order::release);
+            frontier.committed_count.store(entries[i].committed_count,
+                                           std::memory_order::release);
+        }
     }
 
     // ------------------------------------------------------------------

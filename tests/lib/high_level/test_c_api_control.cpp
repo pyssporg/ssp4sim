@@ -54,6 +54,39 @@ namespace
         return config_path;
     }
 
+    fs::path write_snapshot_config(const fs::path &workdir)
+    {
+        const auto ssp_root = ssp4sim::tests::reference_ssp::fixture_root(
+            "Dahlquist");
+        REQUIRE(fs::exists(ssp_root / "SystemStructure.ssd"));
+
+        fs::create_directories(workdir);
+
+        nlohmann::json config;
+        config["simulation"] = {
+            {"ssp", ssp_root.string()},
+            {"start_time", 0.0},
+            {"stop_time", 2.0},
+            {"timestep", 0.01},
+            {"tolerance", 1e-6},
+            {"speed", 0.1},
+            {"working_dir", workdir.string()},
+            {"executor", {{"method", "jacobi"}, {"forward_derivatives", false}}},
+            {"log", {{"fmu", false},
+                     {"level_terminal", "disable"},
+                     {"level_file", "disable"},
+                     {"level_json", "disable"},
+                     {"level_cutelog", "disable"}}},
+            {"recording", {{"csv", {{"enable", false}}},
+                           {"sqlite", {{"enable", false}}}}}};
+
+        const auto config_path = workdir / "config.json";
+        std::ofstream output(config_path, std::ios::trunc);
+        REQUIRE(output.is_open());
+        output << config.dump(2);
+        return config_path;
+    }
+
     bool wait_for_state(ssp4sim_simulator_handle *handle,
                         const ssp4sim_run_state expected,
                         const std::chrono::milliseconds timeout)
@@ -151,6 +184,83 @@ TEST_CASE("C ABI runtime control lifecycle", "[high_level][c_api][control]")
     // Partial results stay readable after a stopped run.
     REQUIRE(info.sim_time_ns > 0);
     REQUIRE(info.sim_time_ns <= 10000000000ULL);
+
+    ssp4sim_simulator_destroy(handle);
+}
+
+// ---------------------------------------------------------------------------
+// Description: The C ABI exposes blocking snapshot/restore over the same
+//              lifecycle as the C++ facade.
+// Rationale:   Python binds this ABI directly, so the snapshot surface must be
+//              complete and transactional at the C boundary.
+// ---------------------------------------------------------------------------
+TEST_CASE("C ABI snapshot and restore round-trip",
+          "[high_level][c_api][snapshot]")
+{
+    const auto workdir = ssp4sim::tests::reference_ssp::project_root() /
+                         "build" / "test_cpp_high_level" / "c_api_snapshot";
+    fs::remove_all(workdir);
+    const auto config_path = write_snapshot_config(workdir);
+    const auto snapshot_path = (workdir / "state.snap").string();
+
+    ssp4sim_simulator_handle *handle = nullptr;
+    REQUIRE(ssp4sim_simulator_create(config_path.string().c_str(), &handle) ==
+            SSP4SIM_STATUS_OK);
+    REQUIRE(ssp4sim_simulator_init(handle) == SSP4SIM_STATUS_OK);
+    REQUIRE(ssp4sim_simulator_start(handle) == SSP4SIM_STATUS_OK);
+    REQUIRE(wait_for_state(handle, SSP4SIM_STATE_RUNNING,
+                           std::chrono::seconds(5)));
+
+    // Pause first so the published time and the snapshot agree; a running
+    // snapshot can complete while the control plane has already advanced.
+    REQUIRE(ssp4sim_simulator_pause(handle, 0, 0) == SSP4SIM_STATUS_OK);
+    REQUIRE(wait_for_state(handle, SSP4SIM_STATE_PAUSED,
+                           std::chrono::seconds(5)));
+
+    const uint64_t snapshot_sim_time_ns =
+        ssp4sim_simulator_get_info(handle).sim_time_ns;
+    REQUIRE(ssp4sim_simulator_snapshot(handle, snapshot_path.c_str()) ==
+            SSP4SIM_STATUS_OK);
+    REQUIRE(fs::exists(snapshot_path));
+
+    REQUIRE(ssp4sim_simulator_stop(handle, 0, 0) == SSP4SIM_STATUS_OK);
+    ssp4sim_run_result result = SSP4SIM_RESULT_FAILED;
+    REQUIRE(ssp4sim_simulator_wait(handle, &result) == SSP4SIM_STATUS_OK);
+    REQUIRE(result == SSP4SIM_RESULT_STOPPED);
+
+    REQUIRE(ssp4sim_simulator_restore(handle, snapshot_path.c_str(), 1) ==
+            SSP4SIM_STATUS_OK);
+    ssp4sim_run_info info = ssp4sim_simulator_get_info(handle);
+    REQUIRE(info.state == SSP4SIM_STATE_RUNNING);
+    REQUIRE(info.sim_time_ns >= snapshot_sim_time_ns);
+
+    REQUIRE(ssp4sim_simulator_stop(handle, 0, 0) == SSP4SIM_STATUS_OK);
+    REQUIRE(ssp4sim_simulator_wait(handle, &result) == SSP4SIM_STATUS_OK);
+    REQUIRE(result == SSP4SIM_RESULT_STOPPED);
+
+    // Argument and failure paths: null path/handle are invalid arguments, a
+    // missing snapshot is a runtime error, and the handle stays usable.
+    REQUIRE(ssp4sim_simulator_snapshot(handle, nullptr) ==
+            SSP4SIM_STATUS_INVALID_ARGUMENT);
+    REQUIRE(ssp4sim_simulator_restore(handle, nullptr, 1) ==
+            SSP4SIM_STATUS_INVALID_ARGUMENT);
+    REQUIRE(ssp4sim_simulator_snapshot(nullptr, snapshot_path.c_str()) ==
+            SSP4SIM_STATUS_INVALID_ARGUMENT);
+    REQUIRE(ssp4sim_simulator_restore(nullptr, snapshot_path.c_str(), 1) ==
+            SSP4SIM_STATUS_INVALID_ARGUMENT);
+
+    const auto missing = (workdir / "missing.snap").string();
+    REQUIRE(ssp4sim_simulator_restore(handle, missing.c_str(), 0) ==
+            SSP4SIM_STATUS_RUNTIME_ERROR);
+    REQUIRE(ssp4sim_last_error()[0] != '\0');
+    REQUIRE(ssp4sim_simulator_get_info(handle).state ==
+            SSP4SIM_STATE_STOPPED);
+
+    // A snapshot on a terminal run is rejected and surfaces as a runtime
+    // error, the same mapping a false snapshot result uses.
+    REQUIRE(ssp4sim_simulator_snapshot(handle, snapshot_path.c_str()) ==
+            SSP4SIM_STATUS_RUNTIME_ERROR);
+    REQUIRE(ssp4sim_last_error()[0] != '\0');
 
     ssp4sim_simulator_destroy(handle);
 }
@@ -315,8 +425,8 @@ TEST_CASE("C ABI info agrees with C++", "[high_level][c_api][control]")
 // Description: A run that cannot produce an outcome surfaces an error status
 //              and invalid transitions map to RUNTIME_ERROR.
 // Rationale:   wait() must never report a failed run as completed, and
-//              std::logic_error from RunControl must not be flattened into
-//              INVALID_ARGUMENT.
+//              std::logic_error from the control channel must not be flattened
+//              into INVALID_ARGUMENT.
 // ---------------------------------------------------------------------------
 TEST_CASE("C ABI wait surfaces run errors", "[high_level][c_api][control]")
 {
@@ -387,6 +497,35 @@ TEST_CASE("C ABI create error path", "[high_level][c_api][control]")
             SSP4SIM_STATUS_INVALID_ARGUMENT);
 }
 
+TEST_CASE("C ABI reset rebuilds an initialized run",
+          "[high_level][c_api][control]")
+{
+    const auto workdir = ssp4sim::tests::reference_ssp::project_root() /
+                         "build" / "test_cpp_high_level" / "c_api_reset";
+    const auto config_path = write_control_config(workdir, 0.2, 1.0);
+
+    ssp4sim_simulator_handle *handle = nullptr;
+    REQUIRE(ssp4sim_simulator_create(config_path.string().c_str(), &handle) ==
+            SSP4SIM_STATUS_OK);
+    REQUIRE(ssp4sim_simulator_init(handle) == SSP4SIM_STATUS_OK);
+    REQUIRE(ssp4sim_simulator_start(handle) == SSP4SIM_STATUS_OK);
+    REQUIRE(wait_for_state(handle, SSP4SIM_STATE_RUNNING,
+                           std::chrono::seconds(5)));
+
+    REQUIRE(ssp4sim_simulator_reset(handle) == SSP4SIM_STATUS_OK);
+
+    const ssp4sim_run_info info = ssp4sim_simulator_get_info(handle);
+    REQUIRE(info.state == SSP4SIM_STATE_INITIALIZED);
+    REQUIRE(info.sim_time_ns == 0);
+
+    REQUIRE(ssp4sim_simulator_start(handle) == SSP4SIM_STATUS_OK);
+    ssp4sim_run_result result = SSP4SIM_RESULT_FAILED;
+    REQUIRE(ssp4sim_simulator_wait(handle, &result) == SSP4SIM_STATUS_OK);
+    REQUIRE(result == SSP4SIM_RESULT_COMPLETED);
+
+    ssp4sim_simulator_destroy(handle);
+}
+
 TEST_CASE("C ABI rejects null control arguments", "[high_level][c_api][control]")
 {
     REQUIRE(ssp4sim_simulator_start(nullptr) ==
@@ -394,6 +533,8 @@ TEST_CASE("C ABI rejects null control arguments", "[high_level][c_api][control]"
     REQUIRE(ssp4sim_simulator_pause(nullptr, 0, 0) ==
             SSP4SIM_STATUS_INVALID_ARGUMENT);
     REQUIRE(ssp4sim_simulator_resume(nullptr) ==
+            SSP4SIM_STATUS_INVALID_ARGUMENT);
+    REQUIRE(ssp4sim_simulator_reset(nullptr) ==
             SSP4SIM_STATUS_INVALID_ARGUMENT);
     REQUIRE(ssp4sim_simulator_stop(nullptr, 0, 0) ==
             SSP4SIM_STATUS_INVALID_ARGUMENT);

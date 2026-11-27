@@ -190,3 +190,104 @@ TEST_CASE("RingBuffer tracks timestamps and finds valid indices", "[RingBuffer]"
     REQUIRE(buffer.find_latest_valid_index(300, index) == true);
     REQUIRE(buffer.find_latest_valid_index(301, index) == true);
 }
+
+// ---------------------------------------------------------------------------
+// Description: Verifies serialization captures all metadata and payload bytes
+//              and deserialization reproduces them without reallocating
+// Rationale:   The wire round-trip must be lossless for mid-run state capture
+// ---------------------------------------------------------------------------
+TEST_CASE("RingBuffer serialization round-trips metadata and payload", "[RingBuffer]")
+{
+    constexpr std::size_t capacity = 4;
+    RingBuffer buffer(capacity, sizeof(std::uint32_t));
+
+    const auto first = buffer.push(10);
+    *reinterpret_cast<std::uint32_t *>(buffer.get_item(first)) = 111;
+    const auto second = buffer.push(20);
+    *reinterpret_cast<std::uint32_t *>(buffer.get_item(second)) = 222;
+
+    ssp4sim::serialize::Writer writer;
+    buffer.serialize(writer);
+    const std::vector<std::byte> bytes = writer.take();
+
+    RingBuffer restored(capacity, sizeof(std::uint32_t));
+    ssp4sim::serialize::Reader reader{std::span<const std::byte>(bytes)};
+    restored.deserialize(reader);
+    reader.expect_end();
+
+    REQUIRE(restored.buffers.original_size == buffer.buffers.original_size);
+    REQUIRE(restored.buffers.aligned_size == buffer.buffers.aligned_size);
+    REQUIRE(restored.capacity == buffer.capacity);
+    REQUIRE(restored.head == buffer.head);
+    REQUIRE(restored.write_count == buffer.write_count);
+    REQUIRE(restored.timestamps == buffer.timestamps);
+    REQUIRE(restored.populated == buffer.populated);
+    REQUIRE(restored.get_time(first) == 10);
+    REQUIRE(restored.get_time(second) == 20);
+    REQUIRE(*reinterpret_cast<std::uint32_t *>(restored.get_item(first)) == 111);
+    REQUIRE(*reinterpret_cast<std::uint32_t *>(restored.get_item(second)) == 222);
+}
+
+// ---------------------------------------------------------------------------
+// Description: Verifies pushes after a serialization are undone by
+//              deserialization, making older values and timestamps visible again
+// Rationale:   Proves deserialization actually rewinds the logical ring
+// ---------------------------------------------------------------------------
+TEST_CASE("RingBuffer deserialization rewinds after later pushes", "[RingBuffer]")
+{
+    constexpr std::size_t capacity = 3;
+    RingBuffer buffer(capacity, sizeof(std::uint32_t));
+
+    const auto older = buffer.push(100);
+    *reinterpret_cast<std::uint32_t *>(buffer.get_item(older)) = 1;
+    const auto newer = buffer.push(200);
+    *reinterpret_cast<std::uint32_t *>(buffer.get_item(newer)) = 2;
+
+    ssp4sim::serialize::Writer writer;
+    buffer.serialize(writer);
+    const std::vector<std::byte> bytes = writer.take();
+
+    // Two further pushes wrap the ring and overwrite the older slot.
+    buffer.push(300);
+    const auto overwriter = buffer.push(400);
+    *reinterpret_cast<std::uint32_t *>(buffer.get_item(overwriter)) = 4;
+    std::size_t found = 0;
+    REQUIRE(buffer.find_exact_index(100, found) == false);
+
+    ssp4sim::serialize::Reader reader{std::span<const std::byte>(bytes)};
+    buffer.deserialize(reader);
+    reader.expect_end();
+
+    REQUIRE(buffer.write_count == 2);
+    REQUIRE_FALSE(buffer.is_full());
+    REQUIRE(buffer.find_exact_index(100, found) == true);
+    REQUIRE(found == older);
+    REQUIRE(buffer.find_exact_index(200, found) == true);
+    REQUIRE(found == newer);
+    REQUIRE(buffer.find_exact_index(300, found) == false);
+    REQUIRE(buffer.find_exact_index(400, found) == false);
+    REQUIRE(*reinterpret_cast<std::uint32_t *>(buffer.get_item(older)) == 1);
+    REQUIRE(*reinterpret_cast<std::uint32_t *>(buffer.get_item(newer)) == 2);
+}
+
+// ---------------------------------------------------------------------------
+// Description: Verifies deserialization rejects state from an incompatible ring
+// Rationale:   Identity mismatches would copy the wrong layout into the buffer
+// ---------------------------------------------------------------------------
+TEST_CASE("RingBuffer deserialization rejects identity mismatch", "[RingBuffer]")
+{
+    RingBuffer source(3, sizeof(std::uint32_t));
+    source.push(10);
+    ssp4sim::serialize::Writer writer;
+    source.serialize(writer);
+    const std::vector<std::byte> bytes = writer.take();
+
+    RingBuffer wider(4, sizeof(std::uint32_t));
+    ssp4sim::serialize::Reader wider_reader{std::span<const std::byte>(bytes)};
+    REQUIRE_THROWS_AS(wider.deserialize(wider_reader), ssp4sim::serialize::Error);
+
+    RingBuffer larger_element(3, sizeof(std::uint64_t));
+    ssp4sim::serialize::Reader element_reader{std::span<const std::byte>(bytes)};
+    REQUIRE_THROWS_AS(larger_element.deserialize(element_reader),
+                      ssp4sim::serialize::Error);
+}

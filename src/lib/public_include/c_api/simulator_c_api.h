@@ -99,9 +99,29 @@ ssp4sim_status ssp4sim_simulator_resume(ssp4sim_simulator_handle *handle);
 ssp4sim_status ssp4sim_simulator_stop(ssp4sim_simulator_handle *handle,
                                       int has_at_sim_time,
                                       uint64_t at_sim_time_ns);
+
+/* Stops and joins any current run, discards per-run state, and rebuilds a fresh
+ * initialized run from the creation config. On success the simulator is
+ * initialized at the configured start time and a later init() is invalid.
+ * Blocking; never leaves a live run behind. */
+ssp4sim_status ssp4sim_simulator_reset(ssp4sim_simulator_handle *handle);
+
 ssp4sim_status ssp4sim_simulator_set_speed(ssp4sim_simulator_handle *handle,
                                            double speed, int has_at_sim_time,
                                            uint64_t at_sim_time_ns);
+
+/* Blocks until a snapshot of a Running or Paused run is written. A null handle
+ * or path is SSP4SIM_STATUS_INVALID_ARGUMENT; a snapshot failure is
+ * SSP4SIM_STATUS_RUNTIME_ERROR with the message in ssp4sim_last_error(). */
+ssp4sim_status ssp4sim_simulator_snapshot(ssp4sim_simulator_handle *handle,
+                                          const char *path);
+
+/* Blocks while restoring a snapshot into a fresh initialized run. Any prior
+ * run is stopped first and the current pace is kept. `start` is 0/1; nonzero
+ * starts the restored run before returning. On success the simulator is
+ * initialized (or running) and a later init() is invalid. */
+ssp4sim_status ssp4sim_simulator_restore(ssp4sim_simulator_handle *handle,
+                                         const char *path, int start);
 
 /* Sole readback: returns one coherent run info record. A null handle returns
  * the zero/default RunInfo (Created, 0, 0) and sets ssp4sim_last_error(). */
