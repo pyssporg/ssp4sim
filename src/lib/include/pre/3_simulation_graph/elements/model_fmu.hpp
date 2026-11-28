@@ -20,6 +20,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 #include <unordered_map>
 #include <memory>
@@ -72,6 +73,17 @@ namespace ssp4sim::graph
 
         [[nodiscard]] bool has_feedthrough_outputs() const;
         [[nodiscard]] std::vector<ConnectionInfo*> feedthrough_connections();
+
+        /// Find one input/output connector by variable name. Accepts the bare
+        /// name (`y`) or the map-qualified name (`model.y`).
+        ConnectorInfo *find_connector(VariableSide side,
+                                      const std::string &name);
+        const ConnectorInfo *find_connector(VariableSide side,
+                                            const std::string &name) const;
+
+        /// Strip this model's `<model>.` prefix from a connector map key.
+        std::string bare_connector_name(
+            std::string_view connector_name) const;
 
         void enter_init();
 

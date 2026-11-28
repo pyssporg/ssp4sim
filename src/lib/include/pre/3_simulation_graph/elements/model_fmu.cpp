@@ -68,6 +68,50 @@ namespace ssp4sim::graph
         return result;
     }
 
+    ConnectorInfo *FmuModel::find_connector(VariableSide side,
+                                            const std::string &variable)
+    {
+        auto &connectors = side == VariableSide::Input ? inputs : outputs;
+        auto found = connectors.find(name + "." + variable);
+        if (found == connectors.end())
+        {
+            // Tolerate a caller that already passed the qualified name.
+            found = connectors.find(variable);
+        }
+        if (found == connectors.end())
+        {
+            return nullptr;
+        }
+        return &found->second;
+    }
+
+    const ConnectorInfo *FmuModel::find_connector(
+        VariableSide side, const std::string &variable) const
+    {
+        const auto &connectors = side == VariableSide::Input ? inputs : outputs;
+        auto found = connectors.find(name + "." + variable);
+        if (found == connectors.end())
+        {
+            found = connectors.find(variable);
+        }
+        if (found == connectors.end())
+        {
+            return nullptr;
+        }
+        return &found->second;
+    }
+
+    std::string FmuModel::bare_connector_name(
+        std::string_view connector_name) const
+    {
+        const std::string prefix = name + ".";
+        if (connector_name.rfind(prefix, 0) == 0)
+        {
+            return std::string(connector_name.substr(prefix.size()));
+        }
+        return std::string(connector_name);
+    }
+
     void FmuModel::enter_init()
     {
         LOG_TRACE_L1(log, "[{func}] FmuModel init {}", __func__, name);
@@ -159,6 +203,8 @@ namespace ssp4sim::graph
             access_resolver->copy_model_inputs(this, target_area, step_start, step_end);
         }
 
+        ConnectorInfo::apply_overrides(inputs, input_area.get(), target_area);
+
         // record input data if record_inputs config is enabled
         if (record_inputs)
         {
@@ -188,6 +234,7 @@ namespace ssp4sim::graph
         auto area = output_area->push(time);
 
         ConnectorInfo::read_values_from_model(outputs, output_area.get(), area);
+        ConnectorInfo::apply_overrides(outputs, output_area.get(), area);
 
         if (forward_derivatives && current_time != 0)
         {

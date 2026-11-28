@@ -381,6 +381,173 @@ def test_lifecycle_and_shutdown(daemon: Daemon) -> None:
     assert not socket_path.exists()
 
 
+def wait_state(daemon: Daemon, predicate, *, timeout: float = 20.0) -> dict:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        state = daemon.response({"v": 1, "cmd": "state"})
+        if predicate(state):
+            return state
+        time.sleep(0.01)
+    raise AssertionError(f"timed out waiting for state: {state!r}")
+
+
+def test_override_immediate_set_list_and_clear(daemon: Daemon) -> None:
+    assert daemon.response({"v": 1, "id": 301, "cmd": "start"})["ok"]
+    assert daemon.response({"v": 1, "id": 302, "cmd": "pause"})["ok"]
+    wait_state(daemon, lambda state: state["state"] == "paused")
+
+    target = {"side": "output", "model": "step", "name": "y"}
+    set_response = daemon.response(
+        {
+            "v": 1,
+            "id": 303,
+            "cmd": "set_override",
+            **target,
+            "k": 0.0,
+            "m": 1234.5,
+        }
+    )
+    assert set_response["ok"], set_response
+
+    listing = daemon.response({"v": 1, "id": 304, "cmd": "list_overrides"})
+    assert listing["ok"], listing
+    assert listing["overrides"] == [{**target, "k": 0.0, "m": 1234.5}], listing
+
+    clear_response = daemon.response(
+        {"v": 1, "id": 305, "cmd": "clear_override", **target}
+    )
+    assert clear_response["ok"], clear_response
+
+    listing = daemon.response({"v": 1, "id": 306, "cmd": "list_overrides"})
+    assert listing["overrides"] == [], listing
+
+    unknown = daemon.response(
+        {
+            "v": 1,
+            "id": 307,
+            "cmd": "set_override",
+            "side": "output",
+            "model": "nope",
+            "name": "y",
+            "k": 0.0,
+            "m": 0.0,
+        }
+    )
+    assert unknown["ok"] is False, unknown
+    assert unknown["error"]["code"] == "unknown_variable", unknown
+
+    bad_side = daemon.response(
+        {
+            "v": 1,
+            "id": 308,
+            "cmd": "set_override",
+            "side": "sideways",
+            "model": "step",
+            "name": "y",
+            "k": 0.0,
+            "m": 0.0,
+        }
+    )
+    assert bad_side["error"]["code"] == "bad_value", bad_side
+
+    bad_number = daemon.response(
+        {
+            "v": 1,
+            "id": 309,
+            "cmd": "set_override",
+            **target,
+            "k": 1.0,
+        }
+    )
+    assert bad_number["error"]["code"] == "bad_value", bad_number
+
+    assert daemon.response({"v": 1, "id": 310, "cmd": "resume"})["ok"]
+    done = daemon.wait_event("done", timeout=30.0)
+    while done["result"] != "completed":
+        done = daemon.wait_event("done", timeout=30.0)
+    assert done["result"] == "completed"
+
+
+def test_override_scheduled_set_and_clear(daemon: Daemon) -> None:
+    assert daemon.response({"v": 1, "id": 321, "cmd": "start"})["ok"]
+    assert daemon.response({"v": 1, "id": 322, "cmd": "pause"})["ok"]
+    wait_state(daemon, lambda state: state["state"] == "paused")
+
+    assert daemon.response(
+        {"v": 1, "id": 329, "cmd": "set_speed", "speed": 0.5}
+    )["ok"]
+
+    target = {"side": "output", "model": "step", "name": "y"}
+    set_response = daemon.response(
+        {
+            "v": 1,
+            "id": 323,
+            "cmd": "set_override",
+            **target,
+            "k": 0.0,
+            "m": 1234.5,
+            "at": 0.5,
+        }
+    )
+    assert set_response["ok"], set_response
+
+    clear_response = daemon.response(
+        {"v": 1, "id": 324, "cmd": "clear_override", **target, "at": 1.5}
+    )
+    assert clear_response["ok"], clear_response
+
+    listing = daemon.response({"v": 1, "id": 325, "cmd": "list_overrides"})
+    assert listing["overrides"] == [], listing
+
+    assert daemon.response({"v": 1, "id": 326, "cmd": "resume"})["ok"]
+
+    wait_state(daemon, lambda state: state["sim_time"] >= 1.0)
+    listing = daemon.response({"v": 1, "id": 327, "cmd": "list_overrides"})
+    assert listing["overrides"] == [{**target, "k": 0.0, "m": 1234.5}], listing
+
+    wait_state(daemon, lambda state: state["sim_time"] >= 2.0)
+    listing = daemon.response({"v": 1, "id": 328, "cmd": "list_overrides"})
+    assert listing["overrides"] == [], listing
+
+    assert daemon.response({"v": 1, "id": 330, "cmd": "stop"})["ok"]
+    done = daemon.wait_event("done", timeout=30.0)
+    while done["result"] not in {"stopped", "completed"}:
+        done = daemon.wait_event("done", timeout=30.0)
+
+    result_file = daemon.workdir / "result.csv"
+    assert read_csv_value(result_file, "step.y", 1.0) == pytest.approx(1234.5)
+    assert read_csv_value(result_file, "step.y", 2.0) == pytest.approx(3.0)
+
+
+def test_override_input_side(daemon: Daemon) -> None:
+    assert daemon.response({"v": 1, "id": 331, "cmd": "start"})["ok"]
+    assert daemon.response({"v": 1, "id": 332, "cmd": "pause"})["ok"]
+    wait_state(daemon, lambda state: state["state"] == "paused")
+
+    response = daemon.response(
+        {
+            "v": 1,
+            "id": 333,
+            "cmd": "set_override",
+            "side": "input",
+            "model": "gain",
+            "name": "u",
+            "k": 0.0,
+            "m": 7.0,
+        }
+    )
+    assert response["ok"], response
+
+    assert daemon.response({"v": 1, "id": 334, "cmd": "resume"})["ok"]
+    done = daemon.wait_event("done", timeout=30.0)
+    while done["result"] != "completed":
+        done = daemon.wait_event("done", timeout=30.0)
+
+    # gain.k is 3, so an input override of 7 yields 21 on the output.
+    result_file = daemon.workdir / "result.csv"
+    assert read_csv_value(result_file, "gain.y", 2.0) == pytest.approx(21.0)
+
+
 def test_reset_while_running(daemon: Daemon) -> None:
     assert daemon.response({"v": 1, "id": 18, "cmd": "start"})["ok"]
 

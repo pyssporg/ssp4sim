@@ -58,7 +58,10 @@ the single locked queue/status object, and the internal simulation side.
 - `tests/lib/control/`: unit tests for `ControlChannel` (queue, state, pacing)
   and `PacingClock`.
 
-Variable overrides are planned/deferred and are not in current releases.
+Variable overrides are implemented on the C++ `Simulator` and the daemon. The
+`ControlChannel` carries `SetOverride`/`ClearOverride`; the run loop writes the
+per-connector override at a macro-step boundary, and `FmuModel::pre`/`post`
+applies it before recording or propagation. `list_overrides` is daemon-owned.
 
 ## Core Development Loop
 

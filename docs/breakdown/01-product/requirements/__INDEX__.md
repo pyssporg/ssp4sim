@@ -23,6 +23,6 @@ summary: What the product promises, one leaf per requirement
 - **REQ-013** [REQ-013: Automatic Analysis and Execution Graph Construction](REQ-013.md) — The engine must automatically construct the simulation graph from the SSP without manual ordering configuration
 - **REQ-014** [REQ-014: Configurable Output Paths with Timestamped Artifacts](REQ-014.md) — The engine must anchor default output paths to a working directory and support timestamp substitution in output paths
 - **REQ-015** [REQ-015: SSP Parameter and Start-Value Application](REQ-015.md) — The engine must apply the SSP's parameterization to the simulation before initialization
-- **REQ-016** [REQ-016: Runtime Control and Overrides](REQ-016.md) — The product must expose interactive lifecycle, speed, wait, and planned variable overrides on the C++, C, and Python embedding surfaces
+- **REQ-016** [REQ-016: Runtime Control and Overrides](REQ-016.md) — The product must expose interactive lifecycle, speed, and wait on the C++, C, and Python surfaces, and variable overrides on the C++ and daemon surfaces
 - **REQ-017** [REQ-017: External Runtime Access over a Local Socket](REQ-017.md) — The product must expose the same runtime controls to a separate local process through a Unix-domain-socket daemon without adding a network listener to the engine
 <!-- pb:index:end -->

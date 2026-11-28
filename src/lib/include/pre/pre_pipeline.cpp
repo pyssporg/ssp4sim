@@ -21,6 +21,27 @@
 namespace ssp4sim::pre
 {
 
+    graph::FmuModel *SimulationGraph::find_model(const std::string &name)
+    {
+        const auto found = models.find(name);
+        if (found == models.end())
+        {
+            return nullptr;
+        }
+        return dynamic_cast<graph::FmuModel *>(found->second.get());
+    }
+
+    const graph::FmuModel *SimulationGraph::find_model(
+        const std::string &name) const
+    {
+        const auto found = models.find(name);
+        if (found == models.end())
+        {
+            return nullptr;
+        }
+        return dynamic_cast<const graph::FmuModel *>(found->second.get());
+    }
+
     // Construct the simulation graph from the ssp
 
     SimulationGraph build_simulation_graph(

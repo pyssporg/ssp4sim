@@ -13,6 +13,7 @@
 #include "simulation/signal/sinks/sqlite_recorder_sink.hpp"
 #include "simulation/signal/recorder.hpp"
 
+#include "utils/fmi/data_type_traits.hpp"
 #include "utils/io/io.hpp"
 #include "utils/primitives/map.hpp"
 #include "utils/primitives/uuid.hpp"
@@ -28,6 +29,11 @@
 namespace ssp4sim
 {
     SnapshotError::SnapshotError(std::string code_value, const std::string &message)
+        : std::runtime_error(message), code(std::move(code_value))
+    {
+    }
+
+    OverrideError::OverrideError(std::string code_value, const std::string &message)
         : std::runtime_error(message), code(std::move(code_value))
     {
     }
@@ -298,6 +304,109 @@ namespace ssp4sim
     uint64_t SimulatorCore::end_time_ns() const noexcept
     {
         return p->conf ? p->conf->fmu.end_time : 0;
+    }
+
+    std::vector<OverrideTarget> SimulatorCore::override_targets() const
+    {
+        if (!p->initialized)
+        {
+            throw std::logic_error(
+                "SimulatorCore::override_targets() called before init()");
+        }
+
+        std::vector<OverrideTarget> targets;
+        for (const auto &model_entry : p->sim_graph.models)
+        {
+            const auto *model = p->sim_graph.find_model(model_entry.first);
+            if (model == nullptr)
+            {
+                continue;
+            }
+
+            for (const auto &[name, connector] : model->inputs)
+            {
+                targets.push_back(OverrideTarget{
+                    VariableSide::Input, model_entry.first,
+                    model->bare_connector_name(name),
+                    utils::fmi::is_scalable(connector.type)});
+            }
+            for (const auto &[name, connector] : model->outputs)
+            {
+                targets.push_back(OverrideTarget{
+                    VariableSide::Output, model_entry.first,
+                    model->bare_connector_name(name),
+                    utils::fmi::is_scalable(connector.type)});
+            }
+        }
+        return targets;
+    }
+
+    void SimulatorCore::apply_override(VariableSide side,
+                                       const std::string &model_name,
+                                       const std::string &name,
+                                       double k, double m)
+    {
+        if (!p->initialized)
+        {
+            throw std::logic_error(
+                "SimulatorCore::apply_override() called before init()");
+        }
+
+        auto *model = p->sim_graph.find_model(model_name);
+        if (model == nullptr)
+        {
+            throw OverrideError(
+                "unknown_variable",
+                "unknown model \"" + model_name + "\"");
+        }
+
+        auto *connector = model->find_connector(side, name);
+        if (connector == nullptr)
+        {
+            throw OverrideError(
+                "unknown_variable",
+                "unknown variable \"" + name + "\" on model \"" +
+                    model_name + "\"");
+        }
+        if (!utils::fmi::is_scalable(connector->type))
+        {
+            throw OverrideError(
+                "unsupported_type",
+                "variable \"" + name + "\" on model \"" + model_name +
+                    "\" has unsupported type " + connector->type.to_string());
+        }
+
+        connector->override = Override{k, m};
+    }
+
+    void SimulatorCore::clear_override(VariableSide side,
+                                       const std::string &model_name,
+                                       const std::string &name)
+    {
+        if (!p->initialized)
+        {
+            throw std::logic_error(
+                "SimulatorCore::clear_override() called before init()");
+        }
+
+        auto *model = p->sim_graph.find_model(model_name);
+        if (model == nullptr)
+        {
+            throw OverrideError(
+                "unknown_variable",
+                "unknown model \"" + model_name + "\"");
+        }
+
+        auto *connector = model->find_connector(side, name);
+        if (connector == nullptr)
+        {
+            throw OverrideError(
+                "unknown_variable",
+                "unknown variable \"" + name + "\" on model \"" +
+                    model_name + "\"");
+        }
+
+        connector->override.reset();
     }
 
     bool SimulatorCore::save_snapshot(const std::filesystem::path &path)

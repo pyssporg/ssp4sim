@@ -117,6 +117,29 @@ def test_command_proxy_strips_envelope_and_whitelists(client):
     assert response.json()["state"] == "paused"
     assert client.backend.requests[-1] == {"cmd": "state"}
 
+    override = client.post(
+        "/api/command",
+        json={
+            "cmd": "set_override",
+            "side": "output",
+            "model": "step",
+            "name": "y",
+            "k": 0.0,
+            "m": 1.0,
+            "id": 100,
+            "v": 9,
+        },
+    )
+    assert override.status_code == 200
+    assert client.backend.requests[-1] == {
+        "cmd": "set_override",
+        "side": "output",
+        "model": "step",
+        "name": "y",
+        "k": 0.0,
+        "m": 1.0,
+    }
+
     rejected = client.post("/api/command", json={"cmd": "rm"})
     assert rejected.status_code == 400
 

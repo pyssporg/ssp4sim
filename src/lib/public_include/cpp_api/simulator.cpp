@@ -248,6 +248,81 @@ namespace ssp4sim
         submit_and_wait(std::move(action));
     }
 
+    void Simulator::set_override(VariableSide side, const std::string &model,
+                                 const std::string &name, double k, double m,
+                                 std::optional<uint64_t> at_sim_time_ns)
+    {
+        if (!std::isfinite(k) || !std::isfinite(m))
+        {
+            throw std::invalid_argument(
+                "Simulator::set_override() requires finite k and m");
+        }
+
+        const RunState state = p->session->control().status().state;
+        if (state != RunState::Running && state != RunState::Paused)
+        {
+            throw std::logic_error(
+                "Simulator::set_override() requires a Running or Paused "
+                "simulation");
+        }
+
+        if (!p->session->validate_override(side, model, name))
+        {
+            throw OverrideError(
+                "unsupported_type",
+                "variable \"" + name + "\" on model \"" + model +
+                    "\" has an unsupported type");
+        }
+
+        Action action;
+        action.kind = ActionKind::SetOverride;
+        action.side = side;
+        action.model = model;
+        action.name = name;
+        action.k = k;
+        action.m = m;
+
+        if (at_sim_time_ns)
+        {
+            action.at_ns = *at_sim_time_ns;
+            (void)p->session->control().post(std::move(action));
+            return;
+        }
+
+        submit_and_wait(std::move(action));
+    }
+
+    void Simulator::clear_override(VariableSide side,
+                                   const std::string &model,
+                                   const std::string &name,
+                                   std::optional<uint64_t> at_sim_time_ns)
+    {
+        const RunState state = p->session->control().status().state;
+        if (state != RunState::Running && state != RunState::Paused)
+        {
+            throw std::logic_error(
+                "Simulator::clear_override() requires a Running or Paused "
+                "simulation");
+        }
+
+        (void)p->session->validate_override(side, model, name);
+
+        Action action;
+        action.kind = ActionKind::ClearOverride;
+        action.side = side;
+        action.model = model;
+        action.name = name;
+
+        if (at_sim_time_ns)
+        {
+            action.at_ns = *at_sim_time_ns;
+            (void)p->session->control().post(std::move(action));
+            return;
+        }
+
+        submit_and_wait(std::move(action));
+    }
+
     RunInfo Simulator::info() const
     {
         const ChannelStatus status = p->session->control().status();

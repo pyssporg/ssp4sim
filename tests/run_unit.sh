@@ -26,7 +26,7 @@ BUILD_DIR="${BUILD_DIR:-$REPO_ROOT/build}"
 UNIT_DIR="$BUILD_DIR/tests/lib"
 
 # Curated Phase 0 buckets. Keep in sync with the tier matrix in tests/README.md.
-T1_BINS=(test_mpsc_event_queue test_node test_node_iterator test_ring_buffer test_config test_thread_pool test_control_channel)
+T1_BINS=(test_mpsc_event_queue test_node test_node_iterator test_ring_buffer test_config test_numeric test_thread_pool test_control_channel)
 T2_BINS=(test_parameter_binding test_schema_extensions test_signal_storage test_ssp_elements test_start_value)
 T3_BINS=(test_graph_builder test_ssp_node test_tree_builder test_parameter_binding_integration)
 

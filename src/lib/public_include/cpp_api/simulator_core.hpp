@@ -9,6 +9,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace ssp4sim
 {
@@ -19,6 +20,24 @@ namespace ssp4sim
         std::string code;
 
         SnapshotError(std::string code, const std::string &message);
+    };
+
+    /// Failure raised while resolving a runtime override target. `code` is one
+    /// of "unknown_variable" or "unsupported_type".
+    struct OverrideError : std::runtime_error
+    {
+        std::string code;
+
+        OverrideError(std::string code, const std::string &message);
+    };
+
+    /// One overridable variable discovered from the initialized graph.
+    struct OverrideTarget
+    {
+        VariableSide side = VariableSide::Input;
+        std::string model;
+        std::string name;
+        bool scalable = false;
     };
 
     /**
@@ -84,6 +103,18 @@ namespace ssp4sim
         /// On any failure this throws and leaves the core unspecified; the
         /// caller must destroy it and build a fresh one.
         void load_snapshot(const std::filesystem::path &path);
+
+        /// Variables exposed by the initialized graph, for override target
+        /// validation. Valid after init().
+        std::vector<OverrideTarget> override_targets() const;
+
+        /// Set or clear the effective override for one variable. Must be
+        /// called on the run thread at a macro-step boundary, never while a
+        /// step is in progress.
+        void apply_override(VariableSide side, const std::string &model,
+                            const std::string &name, double k, double m);
+        void clear_override(VariableSide side, const std::string &model,
+                            const std::string &name);
 
         /// Stop and flush the recorder. Idempotent; propagates recorder
         /// failures.

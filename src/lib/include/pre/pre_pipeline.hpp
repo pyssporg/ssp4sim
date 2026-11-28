@@ -9,6 +9,7 @@
 
 namespace ssp4sim::graph
 {
+    class FmuModel;
     class Invocable;
 }
 
@@ -39,6 +40,11 @@ namespace ssp4sim::pre
             }
             return out;
         }
+
+        /// Resolve a graph model by its key. Returns null when absent or when
+        /// the entry is not an FmuModel.
+        graph::FmuModel *find_model(const std::string &name);
+        const graph::FmuModel *find_model(const std::string &name) const;
     };
 
     /// Build the simulation models from an SSP.

@@ -208,5 +208,10 @@ TEST_CASE("data_type_to_string produces readable output", "[schema_extensions]")
         int val_false = 0;
         str = ssp4sim::ext::fmi2::enums::data_type_to_string(DataType::boolean, &val_false);
         CHECK(str.find("0") != std::string::npos);
+
+        // Boolean storage is int-backed; any nonzero int must read as true.
+        int val_nonzero = 256;
+        str = ssp4sim::ext::fmi2::enums::data_type_to_string(DataType::boolean, &val_nonzero);
+        CHECK(str.find("1") != std::string::npos);
     }
 }

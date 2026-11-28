@@ -23,6 +23,8 @@ namespace ssp4sim::runtime
         Resume,
         Stop,
         SetSpeed,
+        SetOverride,
+        ClearOverride,
         Snapshot,
     };
 
@@ -40,6 +42,14 @@ namespace ssp4sim::runtime
         uint64_t at_ns = 0;
         double speed = 0.0;
         std::string path;
+
+        // SetOverride / ClearOverride target and coefficients.
+        VariableSide side = VariableSide::Input;
+        std::string model;
+        std::string name;
+        double k = 0.0;
+        double m = 0.0;
+
         ActionStatus status = ActionStatus::Pending;
     };
 

@@ -8,11 +8,14 @@
 #include <cstdint>
 #include <deque>
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <thread>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 namespace ssp4simd
@@ -70,9 +73,24 @@ namespace ssp4simd
             std::string message;
         };
 
+        /// One scheduled override change. `set == false` is a clear.
+        struct OverrideEvent
+        {
+            ssp4sim::VariableSide side = ssp4sim::VariableSide::Input;
+            std::string model;
+            std::string name;
+            double k = 0.0;
+            double m = 0.0;
+            bool set = false;
+            uint64_t at_ns = 0;
+        };
+
         json do_state(const json &id);
         json do_reset(const json &id);
         json do_restore(const json &id, const json &request);
+        json do_set_override(const json &id, const json &request, bool clear);
+        json do_list_overrides(const json &id);
+        void clear_override_timeline();
 
         bool begin_lifecycle(LifecycleOperation operation,
                              const std::filesystem::path &snapshot, bool start);
@@ -127,6 +145,12 @@ namespace ssp4simd
         ssp4sim::RunInfo lifecycle_cached_info_{};
 
         std::vector<json> events_;
+
+        // Daemon-owned override timeline. Poll-thread only. Keyed by
+        // (at_ns, sequence) so scheduled set/clear order matches the engine's
+        // due-time queue; at_ns 0 is immediate.
+        std::map<std::pair<uint64_t, uint64_t>, OverrideEvent> override_events_;
+        uint64_t next_override_seq_ = 1;
 
         // Monitor bookkeeping, touched only by monitor_tick().
         std::chrono::steady_clock::time_point last_time_emit_{};

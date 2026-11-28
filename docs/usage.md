@@ -256,9 +256,9 @@ nanoseconds; before the first step it is the configured `simulation.start_time`,
 which can be non-zero. `speed` is the current wall-clock pace (`0` = as fast as
 possible).
 
-**Overrides (planned).** Variable overrides (`set_override`, `clear_override`, `list_overrides`) and `y = k*x + m` behavior are planned/deferred and are not in current releases.
+**Overrides.** The C++ `Simulator` exposes `set_override` and `clear_override`; the daemon adds `list_overrides`. `y = k*x + m` applies to the configured `input` or `output` side of a Real, Integer, or Boolean variable, where `x` is that side's current value. Integer results round half away from zero and saturate to int32; a Boolean result is true when nonzero. The value is overridden before it is recorded or passed on, with no promise for the opposite side. Overrides require a Running or Paused run, accept an optional `at_sim_time_ns`, and are discarded by `reset`/`restore` and at terminal state. The C and Python embedding surfaces do not expose overrides yet.
 
-**Scheduling.** `pause`, `stop`, and `set_speed` accept an optional simulation time (`at_sim_time_ns` in C++ and the C ABI, `at` in Python and the daemon). Without it the command applies at the next macro-step boundary; with it the command is deferred to the first macro-step boundary at or after that time, so activation granularity is one macro step. The C ABI adds `has_at_sim_time` and `at_sim_time_ns` to each schedulable call; C++ takes nanoseconds and Python takes seconds. `resume()` has no scheduled form. Scheduling of override commands is planned with the deferred override feature.
+**Scheduling.** `pause`, `stop`, and `set_speed` accept an optional simulation time (`at_sim_time_ns` in C++ and the C ABI, `at` in Python and the daemon). Without it the command applies at the next macro-step boundary; with it the command is deferred to the first macro-step boundary at or after that time, so activation granularity is one macro step. The C ABI adds `has_at_sim_time` and `at_sim_time_ns` to each schedulable call; C++ takes nanoseconds and Python takes seconds. `resume()` has no scheduled form. `set_override` and `clear_override` accept the same optional `at`.
 
 **Waiting and results.** `wait()` is idempotent. In C++ it returns `RunResult`
 (`Completed` or `Stopped`) and throws on failure. The C ABI
@@ -350,6 +350,9 @@ commands; the daemon accepts at most eight clients.
 | `stop` | optional `at` (seconds) | `ok:true` |
 | `state` | — | `ok:true`, `state`, `sim_time` (seconds), `speed`, `session_id`, `artifacts` |
 | `set_speed` | `speed` (finite, `>= 0`), optional `at` (seconds) | `ok:true` |
+| `set_override` | `side` (`input` or `output`), `model`, `name`, `k`, `m` (finite), optional `at` (seconds) | `ok:true` |
+| `clear_override` | `side`, `model`, `name`, optional `at` (seconds) | `ok:true` |
+| `list_overrides` | — | `ok:true`, `overrides` (active `{side, model, name, k, m}` records sorted by side, model, name) |
 | `reset` | — | `ok:true`, `accepted:true`; completion arrives as a `lifecycle` event |
 | `snapshot` | `path` (non-empty string) | `ok:true`, `accepted:true`; completion arrives as a `snapshot` event |
 | `restore` | `path` (non-empty string), optional `start` (default `true`) | `ok:true`, `accepted:true`; completion arrives as a `lifecycle` event |
@@ -357,14 +360,19 @@ commands; the daemon accepts at most eight clients.
 
 `at` and `sim_time` are seconds.
 A scheduled command activates at the first macro-step boundary at or after
-`at`. Override commands (`set_override`, `clear_override`, `list_overrides`) are
-planned/deferred and are not in current releases.
+`at`. Override targets are validated against the initialized graph:
+`set_override`/`clear_override` return `unknown_variable` for an unknown model or
+variable, and `set_override` returns `unsupported_type` for a type it cannot
+scale. `list_overrides` is daemon-owned: it reports only overrides active at the
+current simulation time from the daemon's timeline, so a scheduled change
+appears only after its `at` is reached. `reset`, `restore`, terminal state, and
+`shutdown` discard the timeline.
 
 A response is `{"v":1,"id":<id>,"ok":true,...}` on success or
 `{"v":1,"id":<id>,"ok":false,"error":{"code":"...","message":"..."}}` on
 failure. Typical response error codes include `bad_json`, `bad_version`,
-`bad_request`, `bad_speed`, `bad_value`, `bad_state`, `unknown_command`, and
-`server_busy`. A lifecycle rebuild failure is reported in the `lifecycle` event
+`bad_request`, `bad_speed`, `bad_value`, `bad_state`, `unknown_variable`,
+`unsupported_type`, `unknown_command`, and `server_busy`. A lifecycle rebuild failure is reported in the `lifecycle` event
 with code `reset_failed` or `restore_failed`.
 
 **Events.** Events are pushed to every client; only `snapshot` events carry an `id`:

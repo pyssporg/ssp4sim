@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace ssp4sim
@@ -47,6 +48,42 @@ namespace ssp4sim
             return RunResult::Failed;
         }
     }
+
+    /// Which side of a variable a runtime override applies to.
+    enum class VariableSide
+    {
+        Input = 0,
+        Output = 1,
+    };
+
+    /// Stable wire token for a variable side.
+    constexpr const char *to_string(VariableSide side) noexcept
+    {
+        return side == VariableSide::Input ? "input" : "output";
+    }
+
+    /// Parse "input" or "output". Returns false on any other token.
+    constexpr bool from_string(std::string_view text, VariableSide &out) noexcept
+    {
+        if (text == "input")
+        {
+            out = VariableSide::Input;
+            return true;
+        }
+        if (text == "output")
+        {
+            out = VariableSide::Output;
+            return true;
+        }
+        return false;
+    }
+
+    /// Affine override applied to one side's value: y = k*x + m.
+    struct Override
+    {
+        double k = 0.0;
+        double m = 0.0;
+    };
 
     /// One recorded artifact belonging to a run.
     struct RecordedArtifact

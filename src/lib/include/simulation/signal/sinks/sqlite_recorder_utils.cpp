@@ -1,5 +1,7 @@
 #include "signal/sinks/sqlite_recorder_utils.hpp"
 
+#include "utils/fmi/data_type_traits.hpp"
+
 #include <cctype>
 #include <cstdint>
 #include <format>
@@ -128,18 +130,18 @@ namespace ssp4sim::signal::sqlite_recorder
 
     std::string sql_type_for(types::DataType type)
     {
-        switch (static_cast<types::DataType::Value>(type))
+        if (type == types::DataType::real)
         {
-        case types::DataType::Value::real:
             return "REAL";
-        case types::DataType::Value::integer:
-        case types::DataType::Value::enumeration:
-        case types::DataType::Value::boolean:
-            return "INTEGER";
-        case types::DataType::Value::string:
-            return "TEXT";
-        default:
-            throw std::runtime_error("Unsupported data type for SQLite recording");
         }
+        if (utils::fmi::is_int_backed(type))
+        {
+            return "INTEGER";
+        }
+        if (utils::fmi::is_string(type))
+        {
+            return "TEXT";
+        }
+        throw std::runtime_error("Unsupported data type for SQLite recording");
     }
 }

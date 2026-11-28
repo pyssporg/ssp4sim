@@ -2,6 +2,7 @@
 #include "ssp4cpp/utils/log.hpp"
 
 #include "FMI2_Enums_Ext.hpp"
+#include "utils/fmi/data_type_traits.hpp"
 
 #include <string>
 #include <stdexcept>
@@ -25,21 +26,22 @@ namespace ssp4sim::ext::fmi2
          */
         std::size_t get_data_type_size(types::DataType t)
         {
-            switch (t)
+            if (utils::fmi::is_int_backed(t))
             {
-            case types::DataType::boolean:
-            case types::DataType::integer:
-            case types::DataType::enumeration:
                 return sizeof(int); // typically 4
-            case types::DataType::real:
+            }
+            if (t == types::DataType::real)
+            {
                 return sizeof(double); // typically 8
-            case types::DataType::string:
+            }
+            if (utils::fmi::is_string(t))
+            {
                 return sizeof(std::string);
-            case types::DataType::unknown:
+            }
+            if (t == types::DataType::unknown)
+            {
                 return 0;
             }
-            // If the enum gains a new value and the switch isn’t updated,
-            // this keeps the compiler happy in -Wall/-Wswitch-enums builds.
             throw std::invalid_argument("Unknown DataType");
         }
 
@@ -48,45 +50,44 @@ namespace ssp4sim::ext::fmi2
             IF_LOG({
                 LOG_TRACE_L2(log(), "[{func}] init", __func__);
             });
-            switch (type)
+            if (type == types::DataType::real)
             {
-            case types::DataType::real:
                 return std::to_string(*(double *)data);
-            case types::DataType::boolean:
-                return std::to_string(*(bool *)data);
-            case types::DataType::integer:
-            case types::DataType::enumeration:
-                return std::to_string(*(int *)data);
-            case types::DataType::string:
-                return *(std::string *)data;
-            default:
-                return "<bin>";
             }
+            if (type == types::DataType::boolean)
+            {
+                return std::to_string(*(int *)data != 0 ? 1 : 0);
+            }
+            if (utils::fmi::is_integer_like(type))
+            {
+                return std::to_string(*(int *)data);
+            }
+            if (utils::fmi::is_string(type))
+            {
+                return *(std::string *)data;
+            }
+            return "<bin>";
         }
 
         DefaultValue get_default_value(types::DataType type)
         {
-            switch (type)
+            if (type == types::DataType::boolean)
             {
-            case types::DataType::boolean:
                 return false;
-
-            case types::DataType::integer:
-            case types::DataType::enumeration:
-                return 0;
-
-            case types::DataType::real:
-                return 0.0;
-
-            case types::DataType::string:
-                return "";
-
-            case types::DataType::unknown:
-                return 0;
-
-            default:
-                throw std::runtime_error("Unknown type");
             }
+            if (utils::fmi::is_integer_like(type))
+            {
+                return 0;
+            }
+            if (type == types::DataType::real)
+            {
+                return 0.0;
+            }
+            if (utils::fmi::is_string(type))
+            {
+                return "";
+            }
+            return 0;
         }
     }
 

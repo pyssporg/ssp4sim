@@ -105,6 +105,20 @@ namespace ssp4sim
         void set_speed(double speed,
                        std::optional<uint64_t> at_sim_time_ns = std::nullopt);
 
+        /// Set an affine override `y = k*x + m` on one side of a Real,
+        /// Integer or Boolean variable. Requires a Running or Paused run.
+        /// `at_sim_time_ns` defers the change to that simulation time;
+        /// without it the call blocks until the next macro-step boundary.
+        void set_override(VariableSide side, const std::string &model,
+                          const std::string &name, double k, double m,
+                          std::optional<uint64_t> at_sim_time_ns = std::nullopt);
+
+        /// Remove an override from one side of a variable. Requires a Running
+        /// or Paused run. `at_sim_time_ns` defers the change.
+        void clear_override(VariableSide side, const std::string &model,
+                            const std::string &name,
+                            std::optional<uint64_t> at_sim_time_ns = std::nullopt);
+
         /// Sole public readback of run state, simulation time, speed, session
         /// id and artifacts, all read together so the values agree.
         RunInfo info() const;

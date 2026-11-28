@@ -3,9 +3,7 @@
 #include "runtime_control.hpp"
 
 #include <chrono>
-#include <cmath>
 #include <filesystem>
-#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -20,49 +18,6 @@ namespace ssp4simd
         json request_id(const json &request)
         {
             return request.contains("id") ? request["id"] : json(nullptr);
-        }
-
-        bool get_number_field(const json &request, const char *name, double &out)
-        {
-            if (!request.contains(name) || !request[name].is_number())
-            {
-                return false;
-            }
-            out = request[name].get<double>();
-            return std::isfinite(out);
-        }
-
-        /// Parse the optional "at" field (simulation seconds) into nanoseconds.
-        /// Absent or null leaves `out` empty. Returns false with `message` set
-        /// when "at" is present but not a finite number >= 0 or does not fit in
-        /// uint64_t nanoseconds.
-        bool get_at_ns_field(const json &request, std::optional<uint64_t> &out,
-                             std::string &message)
-        {
-            out.reset();
-            if (!request.contains("at") || request["at"].is_null())
-            {
-                return true;
-            }
-
-            double at_seconds = 0.0;
-            if (!get_number_field(request, "at", at_seconds) ||
-                at_seconds < 0.0)
-            {
-                message = "\"at\" must be a finite number >= 0";
-                return false;
-            }
-
-            const long double ns =
-                static_cast<long double>(at_seconds) * 1.0e9L;
-            if (ns >
-                static_cast<long double>(std::numeric_limits<uint64_t>::max()))
-            {
-                message = "\"at\" is too large";
-                return false;
-            }
-            out = static_cast<uint64_t>(ns);
-            return true;
         }
 
         json artifacts_json(const std::vector<ssp4sim::RecordedArtifact> &artifacts)
@@ -175,6 +130,12 @@ namespace ssp4simd
         json exception_to_error(const json &request, const std::exception &error)
         {
             const auto id = request_id(request);
+            if (const auto *override_error =
+                    dynamic_cast<const ssp4sim::OverrideError *>(&error);
+                override_error != nullptr)
+            {
+                return make_error(id, override_error->code, error.what());
+            }
             if (dynamic_cast<const std::invalid_argument *>(&error) != nullptr)
             {
                 return make_error(id, "bad_value", error.what());
@@ -221,6 +182,8 @@ namespace ssp4simd
           lifecycle_start_(other.lifecycle_start_),
           lifecycle_cached_info_(other.lifecycle_cached_info_),
           events_(std::move(other.events_)),
+          override_events_(std::move(other.override_events_)),
+          next_override_seq_(other.next_override_seq_),
           last_time_emit_(other.last_time_emit_),
           last_time_sim_ns_(other.last_time_sim_ns_),
           observed_state_(other.observed_state_)
@@ -254,6 +217,8 @@ namespace ssp4simd
         lifecycle_busy_ = false;
         lifecycle_operation_ = LifecycleOperation::None;
         lifecycle_start_ = false;
+
+        clear_override_timeline();
 
         // Take the snapshot worker down first so it cannot observe the runner
         // while shutdown tears it down.
@@ -346,6 +311,18 @@ namespace ssp4simd
                 }
                 runner_->set_speed(speed, at_ns);
                 return make_ok(id);
+            }
+            if (command == "set_override")
+            {
+                return do_set_override(id, request, false);
+            }
+            if (command == "clear_override")
+            {
+                return do_set_override(id, request, true);
+            }
+            if (command == "list_overrides")
+            {
+                return do_list_overrides(id);
             }
             if (command == "reset")
             {
@@ -482,6 +459,122 @@ namespace ssp4simd
         return response;
     }
 
+    json Daemon::do_set_override(const json &id, const json &request,
+                                 bool clear)
+    {
+        ssp4sim::VariableSide side;
+        if (!get_side_field(request, side))
+        {
+            return make_error(id, "bad_value",
+                              "\"side\" must be \"input\" or \"output\"");
+        }
+
+        std::string model;
+        if (!get_string_field(request, "model", model))
+        {
+            return make_error(id, "bad_value",
+                              "\"model\" must be a non-empty string");
+        }
+
+        std::string name;
+        if (!get_string_field(request, "name", name))
+        {
+            return make_error(id, "bad_value",
+                              "\"name\" must be a non-empty string");
+        }
+
+        std::optional<uint64_t> at_ns;
+        std::string at_error;
+        if (!get_at_ns_field(request, at_ns, at_error))
+        {
+            return make_error(id, "bad_value", at_error);
+        }
+
+        double k = 0.0;
+        double m = 0.0;
+        if (!clear)
+        {
+            if (!get_number_field(request, "k", k) ||
+                !get_number_field(request, "m", m))
+            {
+                return make_error(id, "bad_value",
+                                  "\"k\" and \"m\" must be finite numbers");
+            }
+        }
+
+        if (clear)
+        {
+            runner_->clear_override(side, model, name, at_ns);
+        }
+        else
+        {
+            runner_->set_override(side, model, name, k, m, at_ns);
+        }
+
+        OverrideEvent event;
+        event.side = side;
+        event.model = std::move(model);
+        event.name = std::move(name);
+        event.k = k;
+        event.m = m;
+        event.set = !clear;
+        event.at_ns = at_ns.value_or(0);
+        override_events_.emplace(
+            std::make_pair(event.at_ns, next_override_seq_++),
+            std::move(event));
+
+        return make_ok(id);
+    }
+
+    json Daemon::do_list_overrides(const json &id)
+    {
+        const auto info = runner_->info();
+        const uint64_t now = info.sim_time_ns;
+
+        std::map<std::tuple<ssp4sim::VariableSide, std::string, std::string>,
+                 const OverrideEvent *>
+            active;
+        for (const auto &[key, event] : override_events_)
+        {
+            (void)key;
+            if (event.at_ns != 0 && event.at_ns > now)
+            {
+                break;
+            }
+
+            const auto target =
+                std::make_tuple(event.side, event.model, event.name);
+            if (event.set)
+            {
+                active[target] = &event;
+            }
+            else
+            {
+                active.erase(target);
+            }
+        }
+
+        json overrides = json::array();
+        for (const auto &[target, event] : active)
+        {
+            (void)target;
+            overrides.push_back(json{{"side", ssp4sim::to_string(event->side)},
+                                     {"model", event->model},
+                                     {"name", event->name},
+                                     {"k", event->k},
+                                     {"m", event->m}});
+        }
+
+        json response = make_ok(id);
+        response["overrides"] = std::move(overrides);
+        return response;
+    }
+
+    void Daemon::clear_override_timeline()
+    {
+        override_events_.clear();
+    }
+
     bool Daemon::begin_lifecycle(LifecycleOperation operation,
                                  const std::filesystem::path &snapshot,
                                  bool start)
@@ -508,6 +601,9 @@ namespace ssp4simd
             lifecycle_old_info_ = {};
             lifecycle_old_error_.clear();
         }
+
+        // Reset/restore rebuild the session and discard control state.
+        clear_override_timeline();
 
         // The lifecycle thread becomes the only user of the runner, so the
         // snapshot worker must be gone first; its pending requests settle as
@@ -925,6 +1021,8 @@ namespace ssp4simd
 
             if (!lifecycle_busy_ && ssp4sim::is_terminal(state))
             {
+                clear_override_timeline();
+
                 std::string message;
                 try
                 {

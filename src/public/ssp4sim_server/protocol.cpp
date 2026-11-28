@@ -3,6 +3,7 @@
 #include "c_api/simulator_c_api.h"
 
 #include <cmath>
+#include <limits>
 
 namespace ssp4simd
 {
@@ -90,5 +91,62 @@ namespace ssp4simd
     double ns_to_seconds(uint64_t value)
     {
         return static_cast<double>(value) / 1.0e9;
+    }
+
+    bool get_number_field(const json &request, const char *name, double &out)
+    {
+        if (!request.contains(name) || !request[name].is_number())
+        {
+            return false;
+        }
+        out = request[name].get<double>();
+        return std::isfinite(out);
+    }
+
+    bool get_string_field(const json &request, const char *name,
+                          std::string &out)
+    {
+        if (!request.contains(name) || !request[name].is_string())
+        {
+            return false;
+        }
+        out = request[name].get<std::string>();
+        return !out.empty();
+    }
+
+    bool get_side_field(const json &request, ssp4sim::VariableSide &out)
+    {
+        std::string side;
+        return get_string_field(request, "side", side) &&
+               ssp4sim::from_string(side, out);
+    }
+
+    bool get_at_ns_field(const json &request, std::optional<uint64_t> &out,
+                         std::string &message)
+    {
+        out.reset();
+        if (!request.contains("at") || request["at"].is_null())
+        {
+            return true;
+        }
+
+        double at_seconds = 0.0;
+        if (!get_number_field(request, "at", at_seconds) ||
+            at_seconds < 0.0)
+        {
+            message = "\"at\" must be a finite number >= 0";
+            return false;
+        }
+
+        const long double ns =
+            static_cast<long double>(at_seconds) * 1.0e9L;
+        if (ns >
+            static_cast<long double>(std::numeric_limits<uint64_t>::max()))
+        {
+            message = "\"at\" is too large";
+            return false;
+        }
+        out = static_cast<uint64_t>(ns);
+        return true;
     }
 }

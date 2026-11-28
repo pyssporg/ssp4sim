@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ssp4sim_definitions.hpp"
+#include "utils/fmi/data_type_traits.hpp"
 
 #include <cstddef>
 #include <cstdlib>
@@ -25,18 +26,17 @@ namespace ssp4sim::utils
 
     inline std::size_t get_value_alignment(types::DataType type)
     {
-        switch (type)
+        if (type == types::DataType::real)
         {
-        case types::DataType::real:
             return alignof(double);
-        case types::DataType::boolean:
-        case types::DataType::integer:
-        case types::DataType::enumeration:
+        }
+        if (fmi::is_int_backed(type))
+        {
             return alignof(int);
-        case types::DataType::string:
+        }
+        if (fmi::is_string(type))
+        {
             return alignof(std::string);
-        case types::DataType::unknown:
-            return alignof(std::byte);
         }
         return alignof(std::byte);
     }

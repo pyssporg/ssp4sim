@@ -1,6 +1,7 @@
 #include "signal/sinks/sqlite_recorder_sink.hpp"
 #include "signal/sinks/sqlite_recorder_utils.hpp"
 
+#include "utils/fmi/data_type_traits.hpp"
 #include "utils/io/io.hpp"
 #include "utils/time/time.hpp"
 
@@ -342,32 +343,34 @@ namespace ssp4sim::signal
             {
                 const auto *data = event.buffer + variable.position;
 
-                switch (static_cast<types::DataType::Value>(variable.type))
+                if (variable.type == types::DataType::real)
                 {
-                case types::DataType::Value::real:
                     sqlite_recorder::check_sqlite_error(
                         sqlite3_bind_double(stmt, variable.bind_index, *reinterpret_cast<const double *>(data)),
                         "Failed to bind real value");
-                    break;
-                case types::DataType::Value::integer:
-                case types::DataType::Value::enumeration:
+                }
+                else if (utils::fmi::is_integer_like(variable.type))
+                {
                     sqlite_recorder::check_sqlite_error(
                         sqlite3_bind_int(stmt, variable.bind_index, *reinterpret_cast<const int *>(data)),
                         "Failed to bind integer value");
-                    break;
-                case types::DataType::Value::boolean:
+                }
+                else if (variable.type == types::DataType::boolean)
+                {
                     sqlite_recorder::check_sqlite_error(
                         sqlite3_bind_int(stmt, variable.bind_index, (*reinterpret_cast<const int *>(data) != 0) ? 1 : 0),
                         "Failed to bind boolean value");
-                    break;
-                case types::DataType::Value::string:
+                }
+                else if (utils::fmi::is_string(variable.type))
+                {
                     sqlite_recorder::check_sqlite_error(
                         sqlite3_bind_text(stmt, variable.bind_index, reinterpret_cast<const std::string *>(data)->c_str(),
                                           static_cast<int>(reinterpret_cast<const std::string *>(data)->size()),
                                           SQLITE_TRANSIENT),
                         "Failed to bind string value");
-                    break;
-                default:
+                }
+                else
+                {
                     throw std::runtime_error("Unsupported data type for SQLite recording");
                 }
             }

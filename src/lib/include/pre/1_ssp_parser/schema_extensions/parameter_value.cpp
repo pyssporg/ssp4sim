@@ -1,6 +1,7 @@
 
 
 #include "FMI2_Enums_Ext.hpp"
+#include "utils/fmi/data_type_traits.hpp"
 
 #include "parameter_value.hpp"
 
@@ -52,23 +53,22 @@ namespace ssp4sim::ext
 
     void ParameterValue::store_value(void *raw_value)
     {
-        switch (type)
+        if (type == types::DataType::real)
         {
-        case types::DataType::real:
             value = *reinterpret_cast<double *>(raw_value);
-            break;
-        case types::DataType::boolean:
-        case types::DataType::integer:
-        case types::DataType::enumeration:
-            value = *reinterpret_cast<int *>(raw_value);
-            break;
-        case types::DataType::string:
-            value = *reinterpret_cast<std::string *>(raw_value);
-            break;
-        case types::DataType::unknown:
-            value = std::monostate();
-            break;
+            return;
         }
+        if (utils::fmi::is_int_backed(type))
+        {
+            value = *reinterpret_cast<int *>(raw_value);
+            return;
+        }
+        if (utils::fmi::is_string(type))
+        {
+            value = *reinterpret_cast<std::string *>(raw_value);
+            return;
+        }
+        value = std::monostate();
     }
 
     void *ParameterValue::raw_ptr()

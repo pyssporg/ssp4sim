@@ -1,5 +1,6 @@
 #include "utils/fmi/model_io.hpp"
 
+#include "utils/fmi/data_type_traits.hpp"
 #include "utils/fmi/fmi4c_adapter.hpp"
 
 #include <stdexcept>
@@ -13,9 +14,7 @@ namespace ssp4sim::utils
                           uint64_t value_reference,
                           void *out)
     {
-        switch (t)
-        {
-        case types::DataType::real:
+        if (t == types::DataType::real)
         {
             if (!model.read_real(value_reference, *(double *)out))
             {
@@ -23,7 +22,7 @@ namespace ssp4sim::utils
             }
             return;
         }
-        case types::DataType::boolean:
+        if (t == types::DataType::boolean)
         {
             if (!model.read_boolean(value_reference, *(int *)out))
             {
@@ -31,8 +30,7 @@ namespace ssp4sim::utils
             }
             return;
         }
-        case types::DataType::integer:
-        case types::DataType::enumeration:
+        if (fmi::is_integer_like(t))
         {
             if (!model.read_integer(value_reference, *(int *)out))
             {
@@ -40,7 +38,7 @@ namespace ssp4sim::utils
             }
             return;
         }
-        case types::DataType::string:
+        if (fmi::is_string(t))
         {
             if (!model.read_string(value_reference, *(std::string *)out))
             {
@@ -48,7 +46,8 @@ namespace ssp4sim::utils
             }
             return;
         }
-        case types::DataType::unknown:
+        if (t == types::DataType::unknown)
+        {
             return;
         }
         throw std::invalid_argument("Unknown DataType");
@@ -59,9 +58,7 @@ namespace ssp4sim::utils
                          uint64_t &value_reference,
                          void *data)
     {
-        switch (t)
-        {
-        case types::DataType::real:
+        if (t == types::DataType::real)
         {
             if (!model.write_real(value_reference, *(double *)data))
             {
@@ -69,7 +66,7 @@ namespace ssp4sim::utils
             }
             return;
         }
-        case types::DataType::boolean:
+        if (t == types::DataType::boolean)
         {
             if (!model.write_boolean(value_reference, *(int *)data))
             {
@@ -77,8 +74,7 @@ namespace ssp4sim::utils
             }
             return;
         }
-        case types::DataType::integer:
-        case types::DataType::enumeration:
+        if (fmi::is_integer_like(t))
         {
             if (!model.write_integer(value_reference, *(int *)data))
             {
@@ -86,7 +82,7 @@ namespace ssp4sim::utils
             }
             return;
         }
-        case types::DataType::string:
+        if (fmi::is_string(t))
         {
             if (!model.write_string(value_reference, *(std::string *)data))
             {
@@ -94,7 +90,8 @@ namespace ssp4sim::utils
             }
             return;
         }
-        case types::DataType::unknown:
+        if (t == types::DataType::unknown)
+        {
             return;
         }
         throw std::invalid_argument("Unknown DataType");

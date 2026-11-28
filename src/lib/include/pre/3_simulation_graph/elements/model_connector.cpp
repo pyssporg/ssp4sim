@@ -2,12 +2,14 @@
 
 #include "../../1_ssp_parser/schema_extensions/FMI2_Enums_Ext.hpp"
 #include "utils/fmi/model_io.hpp"
+#include "utils/fmi/value_transform.hpp"
 
 #include <cstring>
 #include <sstream>
 
 namespace ssp4sim::graph
 {
+
     std::string ConnectorInfo::to_string() const
     {
         std::ostringstream oss;
@@ -128,6 +130,26 @@ namespace ssp4sim::graph
         IF_LOG({
             LOG_TRACE_L1(storage->log, "[{func}] Completed copy from model", __func__);
         });
+    }
+
+    void ConnectorInfo::apply_overrides(
+        std::unordered_map<std::string, ConnectorInfo> &connectors,
+        ssp4sim::signal::SignalStorage *storage,
+        int area)
+    {
+        for (auto &[_, connector] : connectors)
+        {
+            if (!connector.override)
+            {
+                continue;
+            }
+
+            utils::fmi::apply_affine(
+                connector.type,
+                storage->get_item(area, connector.index),
+                connector.override->k,
+                connector.override->m);
+        }
     }
 
     void ConnectorInfo::apply_input_derivatives(std::unordered_map<std::string, ConnectorInfo> &inputs,

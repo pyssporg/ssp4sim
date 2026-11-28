@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Variable overrides (`REQ-016`, `REQ-017`): C++
+  `Simulator::set_override`/`clear_override` apply `y = k*x + m` to the
+  configured `input` or `output` side of a Real, Integer, or Boolean variable
+  before it is recorded or propagated, with optional `at` scheduling.
+  `ssp4simd` adds `set_override`, `clear_override`, and `list_overrides`;
+  `list_overrides` is daemon-owned and derived from the daemon's scheduled
+  event timeline filtered by the current `info().sim_time_ns`. Targets are
+  validated against the initialized graph (`unknown_variable`,
+  `unsupported_type`), and the timeline is discarded by reset, restore,
+  terminal state, and shutdown.
 - Per-run identity on the control surface: `RunInfo` carries the run's
   `session_id` (stable per run, new after reset/restore) and absolute CSV/SQLite
   `artifacts` (SQLite `run_id`; empty before init or when recording is off),
@@ -41,15 +51,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   at or after that time. Terminal outcomes are monotonic;
   `stop` is idempotent once stopping or terminal and preserves results up to
   the last completed macro step, and a completed run reports the configured end
-  time. Variable overrides and override commands are planned/deferred and not
-  in this release.
+  time.
 - `ssp4simd`, a local control daemon speaking newline-delimited JSON over a
   Unix domain socket, built by default with `SSP4SIM_BUILD_SERVER=ON`. It
-  serves 10 commands and 6 event types from one single-threaded poll loop,
+  serves 13 commands and 6 event types from one single-threaded poll loop,
   caps concurrent clients at eight, creates the socket with mode `0600`, and
   unlinks it on clean shutdown and on SIGTERM/SIGINT. Only the
-  `--config <path>` / `--socket <path>` forms are accepted. Override commands
-  are planned/deferred and not in this release.
+  `--config <path>` / `--socket <path>` forms are accepted.
 
 ### Changed
 

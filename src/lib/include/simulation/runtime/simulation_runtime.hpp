@@ -9,11 +9,13 @@
 #include <cstdint>
 #include <filesystem>
 #include <future>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <thread>
+#include <tuple>
 
 namespace ssp4sim
 {
@@ -57,6 +59,12 @@ namespace ssp4sim
 
             bool started() const;
 
+            /// Resolve an override target against the initialized graph.
+            /// Throws OverrideError("unknown_variable") when the model or
+            /// variable is unknown. Returns whether the type can be scaled.
+            bool validate_override(VariableSide side, const std::string &model,
+                                   const std::string &name) const;
+
             /// Publish a speed update when no run thread consumes actions yet.
             void set_speed_before_start(double speed);
 
@@ -74,6 +82,10 @@ namespace ssp4sim
 
             std::unique_ptr<ControlChannel> channel_;
             PacingClock clock_;
+
+            // Immutable after init(); read by callers, never by the run loop.
+            std::map<std::tuple<VariableSide, std::string, std::string>, bool>
+                override_targets_;
 
             mutable std::mutex lifecycle_mutex_;
             std::thread run_thread_;

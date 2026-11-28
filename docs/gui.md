@@ -128,12 +128,11 @@ read-out; the raw sample stays available in the tooltip and cell title, and the
 simulation data is never modified. Overrides persist in browser `localStorage`
 and survive reloads.
 
-Engine-side overrides are not available yet. The daemon has no override command
-on `main`; the planned `set_override`, `clear_override`, and `list_overrides`
-commands are tracked in [IMP-054](breakdown/06-evolution/suggested/daemon-api-stability-run-manifest-and-parameter-mutation.md).
-The local override records are the intended payload source when that lands; the
-engine boundary (`EngineBackend`) and HTTP command whitelist must be extended at
-the same time.
+The daemon now exposes engine-side `set_override`, `clear_override`, and
+`list_overrides` (`REQ-016`, `REQ-017`). The Values table is still viewer-side:
+it does not send those commands yet, so its `k`/`m` records remain local and the
+simulation data is unchanged. Wiring the table to the daemon is the follow-up;
+the HTTP command whitelist already forwards the three commands.
 
 ## Result Artifacts And Live Data
 
@@ -196,6 +195,6 @@ package (or its dependencies) to run them.
 - There is no single-step command over the daemon.
 - The GUI does not spawn `ssp4simd`; start it separately.
 - One active simulation per daemon.
-- Overrides are viewer-side only until the daemon exposes `set_override`,
-  `clear_override`, and `list_overrides`.
+- The Values table applies overrides viewer-side only; the daemon commands are
+  available but the frontend does not send them yet.
 - CSV does not escape commas, quotes, or newlines in signal names/string values.

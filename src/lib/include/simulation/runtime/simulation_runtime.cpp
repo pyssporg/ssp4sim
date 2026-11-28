@@ -64,10 +64,34 @@ namespace ssp4sim
         void SimulationRuntime::init()
         {
             core_->init();
+
+            for (const auto &target : core_->override_targets())
+            {
+                override_targets_.emplace(
+                    std::make_tuple(target.side, target.model, target.name),
+                    target.scalable);
+            }
+
             // Publish identity before the state so a client that observes
             // Initialized can already read it.
             channel_->publish_identity(core_->session_id(), core_->artifacts());
             channel_->set_state(RunState::Initialized);
+        }
+
+        bool SimulationRuntime::validate_override(
+            VariableSide side, const std::string &model,
+            const std::string &name) const
+        {
+            const auto found =
+                override_targets_.find(std::make_tuple(side, model, name));
+            if (found == override_targets_.end())
+            {
+                throw OverrideError(
+                    "unknown_variable",
+                    "unknown variable \"" + name + "\" on model \"" + model +
+                        "\"");
+            }
+            return found->second;
         }
 
         bool SimulationRuntime::started() const
@@ -336,6 +360,56 @@ namespace ssp4sim
                         std::make_exception_ptr(std::invalid_argument(
                             "Simulator::set_speed() requires a finite speed "
                             ">= 0")));
+                }
+                return true;
+
+            case ActionKind::SetOverride:
+                if (status.state != RunState::Running &&
+                    status.state != RunState::Paused)
+                {
+                    channel_->settle(
+                        action.seq, ActionStatus::Nok,
+                        control_error(
+                            "Simulator::set_override() requires a Running or "
+                            "Paused simulation"));
+                    return true;
+                }
+
+                try
+                {
+                    core_->apply_override(action.side, action.model,
+                                          action.name, action.k, action.m);
+                    channel_->settle(action.seq, ActionStatus::Ok);
+                }
+                catch (...)
+                {
+                    channel_->settle(action.seq, ActionStatus::Nok,
+                                     std::current_exception());
+                }
+                return true;
+
+            case ActionKind::ClearOverride:
+                if (status.state != RunState::Running &&
+                    status.state != RunState::Paused)
+                {
+                    channel_->settle(
+                        action.seq, ActionStatus::Nok,
+                        control_error(
+                            "Simulator::clear_override() requires a Running "
+                            "or Paused simulation"));
+                    return true;
+                }
+
+                try
+                {
+                    core_->clear_override(action.side, action.model,
+                                          action.name);
+                    channel_->settle(action.seq, ActionStatus::Ok);
+                }
+                catch (...)
+                {
+                    channel_->settle(action.seq, ActionStatus::Nok,
+                                     std::current_exception());
                 }
                 return true;
 

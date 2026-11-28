@@ -35,6 +35,9 @@ ALLOWED_COMMANDS = {
     "stop",
     "reset",
     "set_speed",
+    "set_override",
+    "clear_override",
+    "list_overrides",
     "state",
     "shutdown",
 }

@@ -118,7 +118,7 @@ same way.
 
 | Tier | Directory | Test files |
 |------|-----------|------------|
-| T1 kernel/units | `tests/lib/core/`, `tests/lib/utils/`, `tests/lib/control/` | `test_mpsc_event_queue`, `test_node`, `test_node_iterator`, `test_ring_buffer`, `test_config`, `test_thread_pool`, `test_control_channel` |
+| T1 kernel/units | `tests/lib/core/`, `tests/lib/utils/`, `tests/lib/control/` | `test_mpsc_event_queue`, `test_node`, `test_node_iterator`, `test_ring_buffer`, `test_config`, `test_numeric`, `test_thread_pool`, `test_control_channel` |
 | T2 parser | `tests/lib/core/` | `test_parameter_binding`, `test_schema_extensions`, `test_signal_storage`, `test_ssp_elements`, `test_start_value` |
 | T3 analysis/graph | `tests/lib/analysis/`, `tests/lib/core/` | `test_graph_builder`, `test_ssp_node`, `test_tree_builder`, `test_parameter_binding_integration` |
 | T4 integration | `tests/lib/high_level/`, `tests/lib/core/`, `tests/lib/graph/`, `tests/lib/model/`, `tests/lib/simulation/` | retained in `ssp4sim_tests` or standalone (`test_snapshot`, `test_simulator_core_c_api`); includes `test_c_api_control.cpp` and `test_simulator_core_c_api.cpp` |
@@ -272,8 +272,10 @@ Runtime control is covered at four levels:
   running, with terminal-event ordering), `shutdown`, a failed run, and the
   stable per-run `session_id` plus absolute artifact paths in `state`/`done`.
 
-Variable overrides and override commands are planned/deferred and are not in
-current releases.
+The same file covers variable overrides end to end: immediate
+`set_override`/`clear_override` with `list_overrides`, scheduled set and clear
+(including the paused-run listing), the input side, and the `unknown_variable`
+and `bad_value` error paths.
 
 ## Reference Fixtures
 
